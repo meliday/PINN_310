@@ -61,6 +61,10 @@ def load_observations(name, known, data_dir=DATA_DIR):
     xy = df[["x", "y"]].to_numpy(float)
     theta = df["theta_obs"].to_numpy(float)
     T_C = df["T_obs_C"].to_numpy(float)
+    # NaN compares False against every tolerance, so check finiteness explicitly.
+    for col, arr in (("x/y", xy), ("theta_obs", theta), ("T_obs_C", T_C)):
+        if not np.all(np.isfinite(arr)):
+            raise ValueError(f"{fname}: non-finite or missing {col}")
     LX, LY = known["domain"]["LX"], known["domain"]["LY"]
     if not (np.all((xy[:, 0] >= 0) & (xy[:, 0] <= LX)) and np.all((xy[:, 1] >= 0) & (xy[:, 1] <= LY))):
         raise ValueError(f"{fname}: sensor outside the domain")

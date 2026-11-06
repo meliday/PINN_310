@@ -2,3 +2,7 @@
 2026-11-06T22:25:49+09:00	reference.npz	E0 tool diagnostic (solver reproduction / orientation)
 2026-11-06T22:25:49+09:00	reference.npz	E0 evaluation: Q1 metrics
 2026-11-06T22:25:49+09:00	config.json	E0 evaluation: true Bi and heat flows
+2026-11-06T22:35:34+09:00	config.json	E0 tool diagnostic (solver reproduction / orientation)
+2026-11-06T22:35:34+09:00	reference.npz	E0 tool diagnostic (solver reproduction / orientation)
+2026-11-06T22:35:36+09:00	reference.npz	E0 evaluation: Q1 metrics
+2026-11-06T22:35:36+09:00	config.json	E0 evaluation: true Bi and heat flows

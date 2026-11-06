@@ -21,7 +21,7 @@
     "message": "`xtol` termination condition is satisfied.",
     "nfev": 31,
     "n_solves": 88,
-    "time_s": 0.9160740830120631
+    "time_s": 0.8640585830144119
   },
   {
     "start": [
@@ -45,7 +45,7 @@
     "message": "`xtol` termination condition is satisfied.",
     "nfev": 20,
     "n_solves": 59,
-    "time_s": 0.5778190839919262
+    "time_s": 0.5822763330070302
   },
   {
     "start": [
@@ -69,6 +69,6 @@
     "message": "`xtol` termination condition is satisfied.",
     "nfev": 23,
     "n_solves": 65,
-    "time_s": 0.6450596249778755
+    "time_s": 0.6350577919802163
   }
 ]

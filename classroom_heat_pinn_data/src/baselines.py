@@ -29,7 +29,8 @@ def fit_fd_inverse(obs, known, experiment=None):
     """Least-squares fit of beta = log Bi (S, E, N) to sensor theta on the 101 x 81 grid.
 
     experiment: optional dict with 'starts' (Bi triples), 'nx', 'max_nfev'.
-    Runs every start, keeps all results, and selects the lowest training cost.
+    Runs every start, keeps all results, and selects the lowest training cost among
+    starts the optimizer reports as converged; status is 'failed' if none converged.
     """
     experiment = experiment or {}
     nx = experiment.get("nx", fd.INVERSE_NX)
@@ -55,8 +56,10 @@ def fit_fd_inverse(obs, known, experiment=None):
             res = least_squares(residual, beta0, bounds=(lo, hi), method="trf",
                                 x_scale=1.0, ftol=1e-14, xtol=1e-14, gtol=1e-14,
                                 max_nfev=max_nfev)
+            # status 0 (max_nfev reached) or -1 is not a converged fit.
+            finite = bool(np.all(np.isfinite(res.x)) and np.isfinite(res.cost))
             runs.append({
-                "start": list(start), "ok": bool(np.all(np.isfinite(res.x))),
+                "start": list(start), "ok": finite and bool(res.success),
                 "Bi": dict(zip(common.ROBIN_WALLS, np.exp(res.x))),
                 "beta": res.x, "cost": float(res.cost), "status": int(res.status),
                 "message": res.message, "nfev": int(res.nfev),
@@ -70,7 +73,9 @@ def fit_fd_inverse(obs, known, experiment=None):
 
     ok = [r for r in runs if r["ok"]]
     if not ok:
-        return {"status": "failed", "runs": runs, "wall_time_s": fit_time}
+        return {"status": "failed", "reason": "no start converged",
+                "runs": [{k: v for k, v in r.items() if k != "jac"} for r in runs],
+                "total_solves": n_solves[0], "wall_time_s": fit_time, "nx": nx}
     best = min(ok, key=lambda r: r["cost"])
     resid = residual(best["beta"])
     J = best["jac"]  # d theta_sensor / d beta at the selected solution
@@ -81,6 +86,7 @@ def fit_fd_inverse(obs, known, experiment=None):
         "Bi": best["Bi"],
         "beta": best["beta"],
         "selected_start": best["start"],
+        "n_converged": len(ok),
         "sensor_rms_C": float(np.sqrt(np.mean(resid ** 2)) * common.dt_K(known)),
         "sensor_maxabs_C": float(np.abs(resid).max() * common.dt_K(known)),
         "jacobian": {"rank": rank, "singular_values": sv,

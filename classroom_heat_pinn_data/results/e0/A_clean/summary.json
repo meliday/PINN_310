@@ -55,8 +55,9 @@
       "frac_out_hull": 0.4808506692219715,
       "n_eval_points": 32351
     },
-    "wall_time_s": 0.0024452089855913073
+    "wall_time_s": 0.0021635839948430657
   },
+  "status": "completed",
   "fd_inverse": {
     "status": "completed",
     "Bi": {
@@ -74,6 +75,7 @@
       1.0,
       1.0
     ],
+    "n_converged": 3,
     "sensor_rms_C": 6.496000972244693e-05,
     "sensor_maxabs_C": 0.00013297644551046872,
     "jacobian": {
@@ -86,7 +88,7 @@
       "condition_number": 22.74105509714527
     },
     "total_solves": 213,
-    "wall_time_s": 2.1389561250107363,
+    "wall_time_s": 2.081398958020145,
     "nx": 101,
     "q1": {
       "q1_rmse_C": 0.00045933722131327303,

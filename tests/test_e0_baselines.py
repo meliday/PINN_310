@@ -11,7 +11,7 @@ from unittest import mock
 
 import numpy as np
 
-from classroom_heat_pinn_data.src import baselines, common, evaluate, fd
+from classroom_heat_pinn_data.src import baselines, common, evaluate, fd, run_experiments
 
 # Records every file opened while armed; the hook cannot be removed, so it is gated.
 _OPENED = []
@@ -50,7 +50,7 @@ class TruthIsolationTests(unittest.TestCase):
             obs = common.load_observations("A_clean", known)
             q = np.array([[0.5, 0.4], [0.1, 0.1]])
             baselines.reconstruct_rbf(obs.xy, obs.theta, q)
-            fit = baselines.fit_fd_inverse(obs, known, {"starts": [(1, 1, 1)], "max_nfev": 5})
+            fit = baselines.fit_fd_inverse(obs, known, {"starts": [(1, 1, 1)]})
         self.assertEqual(fit["status"], "completed")
         self.assertTrue(any(p.endswith("sensors_A_clean.csv") for p in opened))
         self.assertFalse(set(opened) & TRUTH_REAL, f"truth opened: {set(opened) & TRUTH_REAL}")
@@ -90,6 +90,55 @@ class DataContractTests(unittest.TestCase):
         (self.tmp / "sensors_A_clean.csv").write_text("\n".join([src[0], ",".join(cols)] + src[2:]) + "\n")
         with self.assertRaises(ValueError):
             common.load_observations("A_clean", self.known, self.tmp)
+
+    def test_missing_values_rejected(self):
+        src = (common.DATA_DIR / "sensors_A_clean.csv").read_text().splitlines()
+        cols = src[1].split(",")
+        cols[3] = cols[4] = ""  # NaN would otherwise pass the unit tolerance check
+        (self.tmp / "sensors_A_clean.csv").write_text("\n".join([src[0], ",".join(cols)] + src[2:]) + "\n")
+        with self.assertRaises(ValueError):
+            common.load_observations("A_clean", self.known, self.tmp)
+
+
+class RunBookkeepingTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def test_unconverged_fit_is_failed(self):
+        known = common.load_known()
+        obs = common.load_observations("A_clean", known)
+        fit = baselines.fit_fd_inverse(obs, known, {"starts": [(1, 1, 1)], "max_nfev": 1})
+        self.assertEqual(fit["status"], "failed")
+        self.assertEqual(fit["runs"][0]["status"], 0)
+        self.assertFalse(fit["runs"][0]["ok"])
+
+    def test_metrics_upsert_keeps_other_datasets(self):
+        path = self.tmp / "metrics.csv"
+        row = lambda data, rmse: evaluate.metrics_row(
+            exp_id="E0", method="RBF_tps", data_file=data, status="completed", q1_rmse_C=rmse)
+        run_experiments.write_metrics([row("sensors_A_clean.csv", 1.0)], path)
+        run_experiments.write_metrics([row("sensors_B_clean.csv", 2.0)], path)
+        run_experiments.write_metrics([row("sensors_A_clean.csv", 3.0)], path)
+        with open(path, newline="") as fh:
+            got = {r["data_file"]: r["q1_rmse_C"] for r in run_experiments.csv.DictReader(fh)}
+        self.assertEqual(got, {"sensors_A_clean.csv": "3.0", "sensors_B_clean.csv": "2.0"})
+
+    def test_failed_tool_check_stops_before_fitting(self):
+        def fake_checks(known, obs):
+            return {"passed": {"mms_order_gt_1.8": True, "energy_lt_1e-8": False}}
+
+        with mock.patch.object(common, "RESULTS_DIR", self.tmp), \
+             mock.patch.object(run_experiments, "tool_checks", fake_checks), \
+             mock.patch.object(baselines, "fit_fd_inverse", _blocked), \
+             mock.patch.object(baselines, "reconstruct_rbf", _blocked):
+            s = run_experiments.run_e0("A_clean")
+        self.assertEqual(s["status"], "failed")
+        self.assertIn("energy_lt_1e-8", s["reason"])
+        self.assertTrue((self.tmp / "e0" / "A_clean" / "summary.json").exists())
+        with open(self.tmp / "metrics.csv", newline="") as fh:
+            statuses = {r["method"]: r["status"] for r in run_experiments.csv.DictReader(fh)}
+        self.assertEqual(statuses, {"RBF_tps": "failed", "FD_inverse": "failed"})
 
 
 class OrientationAndFluxTests(unittest.TestCase):
