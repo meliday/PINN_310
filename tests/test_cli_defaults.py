@@ -1,5 +1,7 @@
-"""E3-CLI-DATA-01: per-experiment default data and noise metadata that match the data."""
+"""Per-experiment data defaults and E3/E5 evaluation-data contracts."""
 
+from contextlib import redirect_stderr
+import io
 import json
 from pathlib import Path
 import shutil
@@ -34,6 +36,9 @@ class CliDefaultDataTests(unittest.TestCase):
 
     def test_e3_defaults_to_noisy(self):
         self.assertEqual(self._data_for(["--exp", "E3"], "run_e3"), "A_noisy")
+
+    def test_e5_defaults_to_mismatch(self):
+        self.assertEqual(self._data_for(["--exp", "E5"], "run_e5"), "A_mismatch")
 
     def test_e0_and_e2_default_to_clean(self):
         self.assertEqual(self._data_for(["--exp", "E0"], "run_e0"), "A_clean")
@@ -71,6 +76,61 @@ class NoiseMetadataTests(unittest.TestCase):
         self.assertEqual(saved["noise_sigma_C"], 0.0)
         self.assertIn("skipped", s["fd_inverse"]["local_uncertainty"])
         self.assertNotIn("rel_std_bi", s["fd_inverse"]["local_uncertainty"])
+
+
+class E5DataContractTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        patcher = mock.patch.object(common, "RESULTS_DIR", self.tmp)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_wrong_data_is_rejected_before_reading_or_output(self):
+        with mock.patch.object(common, "load_known", side_effect=AssertionError("unexpected data read")) as load, \
+                mock.patch.object(rx, "_claim_run_dir") as claim:
+            for name in ("A_clean", "A_noisy", "B_clean", "B_noisy", "unknown", None):
+                with self.subTest(data=name), self.assertRaisesRegex(ValueError, "E5 requires 'A_mismatch'"):
+                    rx.run_e5(name)
+            load.assert_not_called()
+            claim.assert_not_called()
+        self.assertEqual(list(self.tmp.iterdir()), [])
+
+    def test_wrong_cli_data_exits_2_before_dispatch(self):
+        with mock.patch.object(rx, "run_e5", side_effect=AssertionError("unexpected E5 run")) as runner:
+            for name in ("A_clean", "A_noisy", "B_clean", "B_noisy", "unknown"):
+                stderr = io.StringIO()
+                with self.subTest(data=name), redirect_stderr(stderr), self.assertRaises(SystemExit) as stopped:
+                    rx.main(["--exp", "E5", "--data", name])
+                self.assertEqual(stopped.exception.code, 2)
+                self.assertIn("E5 requires 'A_mismatch'", stderr.getvalue())
+                self.assertNotIn("Traceback", stderr.getvalue())
+            runner.assert_not_called()
+        self.assertEqual(list(self.tmp.iterdir()), [])
+
+    def test_wrong_data_cannot_overwrite_existing_output(self):
+        run_dir = self.tmp / "e5" / "A_clean_seed0"
+        run_dir.mkdir(parents=True)
+        checkpoint = run_dir / "checkpoint.pt"
+        checkpoint.write_bytes(b"previous checkpoint")
+        with mock.patch.object(common, "load_known", side_effect=AssertionError("unexpected data read")), \
+                self.assertRaisesRegex(ValueError, "E5 requires 'A_mismatch'"):
+            rx.run_e5("A_clean", overwrite=True)
+        self.assertEqual(checkpoint.read_bytes(), b"previous checkpoint")
+        self.assertEqual([p for p in self.tmp.rglob("*") if p.is_file()], [checkpoint])
+
+    def test_mismatch_data_runs_and_keeps_matching_evaluation(self):
+        tiny = {"adam_steps": 2, "lbfgs_iters": 0, "n_interior": 40, "n_wall": 8, "hidden": 8, "depth": 1}
+        with mock.patch.dict(rx.E2_CONFIGS["C1"], tiny):
+            summary = rx.run_e5("A_mismatch", 0)
+        saved = json.loads((self.tmp / "e5" / "A_mismatch_seed0" / "summary.json").read_text())
+        self.assertEqual(summary["status"], "completed")
+        self.assertEqual(saved["data_file"], "sensors_A_mismatch.csv")
+        self.assertLess(saved["truth"]["field_maxdiff_vs_reference_C"], 1e-8)
+        self.assertAlmostEqual(saved["truth"]["shares"]["draft"], 0.1)
+        log = (self.tmp / "logs" / "truth_access.log").read_text()
+        self.assertIn("mismatch_reference.npz", log)
+        self.assertNotIn("\treference.npz\t", log)
 
 
 if __name__ == "__main__":

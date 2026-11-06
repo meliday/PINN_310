@@ -5,6 +5,7 @@
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E2 --data A_clean --seed 0
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E2 --data A_clean --seed 0 --config C1
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E3 --data A_noisy --seed 0
+    cd classroom_heat_pinn_data && python -m src.run_experiments --exp E5 --seed 0
 
 Fitting (RBF, FD-inverse) receives only known.json and sensor observations.
 Truth is loaded afterwards through evaluate.py and every access is logged.
@@ -542,6 +543,17 @@ def fd_local_uncertainty(beta, obs, known, sigma_theta, h=1e-4):
 
 
 def plot_e3(ref, fields, obs, flows, known, fig_dir, run, sigma_C):
+    noise = f"noise {sigma_C:g} °C" if sigma_C > 0 else "clean (no noise)"
+    shares = {name: fl["share_signed"] for name, fl in flows.items()}
+    plot_compare(ref, fields, obs, shares, known, fig_dir / f"e3_{run}.png",
+                 f"E3 {run} — simplified 2D model, synthetic data, {noise}, single seed, config {E3_CONFIG} fixed")
+
+
+def plot_compare(ref, fields, obs, shares, known, fig_path, title):
+    """Reference and method fields, their errors (same colour limits), and signed shares.
+
+    shares: {label: {key: fraction of heater power}}; keys beyond S/E/N (e.g. 'draft') get bars too.
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -566,17 +578,17 @@ def plot_e3(ref, fields, obs, flows, known, fig_dir, run, sigma_C):
         ax.plot(obs.xy[:, 0], obs.xy[:, 1], "o", mfc="none", mec="cyan", ms=6)
     # Signed wall-flow shares in the free bottom-left panel.
     ax = axes[1, 0]
-    walls = list(common.ROBIN_WALLS)
-    xs = np.arange(len(walls))
-    width = 0.8 / len(flows)
-    for i, (name, fl) in enumerate(flows.items()):
-        ax.bar(xs + (i - (len(flows) - 1) / 2) * width, [100 * fl["share_signed"][w] for w in walls],
+    keys = list(common.ROBIN_WALLS) + sorted({k for sh in shares.values() for k in sh} - set(common.ROBIN_WALLS))
+    labels = {"S": "S window", "E": "E exterior", "N": "N corridor", "draft": "draft sink"}
+    xs = np.arange(len(keys))
+    width = 0.8 / len(shares)
+    for i, (name, sh) in enumerate(shares.items()):
+        ax.bar(xs + (i - (len(shares) - 1) / 2) * width, [100 * sh.get(k, 0.0) for k in keys],
                width=width, label=name)
-    ax.set_xticks(xs, ["S window", "E exterior", "N corridor"])
-    ax.set_ylabel("Signed flow / source [%]"); ax.legend(fontsize=8); ax.axhline(0, color="k", lw=0.8)
-    noise = f"noise {sigma_C:g} °C" if sigma_C > 0 else "clean (no noise)"
-    fig.suptitle(f"E3 {run} — simplified 2D model, synthetic data, {noise}, single seed, config {E3_CONFIG} fixed")
-    fig.savefig(fig_dir / f"e3_{run}.png", dpi=130)
+    ax.set_xticks(xs, [labels.get(k, k) for k in keys])
+    ax.set_ylabel("Signed flow / heater power [%]"); ax.legend(fontsize=8); ax.axhline(0, color="k", lw=0.8)
+    fig.suptitle(title)
+    fig.savefig(fig_path, dpi=130)
     plt.close(fig)
 
 
@@ -690,6 +702,177 @@ def run_e3(data_name="A_noisy", seed=0, overwrite=False):
     return summary
 
 
+# E5: the simple model fitted to data from the richer "reality" model (plan section 17.1).
+E5_DATA = "A_mismatch"
+
+
+def _validate_e5_data(data_name):
+    if data_name != E5_DATA:
+        raise ValueError(f"E5 requires {E5_DATA!r}; got {data_name!r}. "
+                         "Other observations do not match its mismatch reference.")
+
+
+def _mismatch_truth(known, purpose):
+    """Truth wall flows of the mismatch model, as fractions of heater power (evaluation only).
+
+    Recomputes them with the solver (variable k, heater + draft sink from mismatch_reference Q)
+    and returns them next to config's stored values so the two can be compared.
+    """
+    cfg = evaluate.load_truth_config(purpose)
+    ref = evaluate.load_reference(purpose, kind="mismatch_reference")
+    bi_true = common.bi_dict(cfg["Bi_true"])
+    LY = known["domain"]["LY"]
+    k_var = lambda X, Y: 1.0 + 0.25 * np.sin(2 * np.pi * X) * np.sin(np.pi * Y / LY)  # config "k"
+    x, y, theta, info = solver.solve(len(ref["x"]), bi_true, common.theta_inf(known), Q=ref["Q"], k=k_var)
+    X, Y = np.meshgrid(x, y, indexing="ij")
+    heat = solver.heater_source(X, Y, common.heaters(known))
+    h = x[1] - x[0]
+    wx = np.full(len(x), h); wx[[0, -1]] = h / 2
+    wy = np.full(len(y), h); wy[[0, -1]] = h / 2
+    heater_power = float((heat * np.outer(wx, wy)).sum())
+    shares = {w: info["loss"][w] / heater_power for w in common.ROBIN_WALLS}
+    shares["draft"] = (heater_power - info["q_in"]) / heater_power  # q_in = heater - sink
+    stored = cfg["mismatch"]["heat_loss_share_true"]
+    return {
+        "Bi": bi_true, "shares": shares, "shares_config": stored, "heater_power": heater_power,
+        "shares_maxdiff_vs_config": max(abs(shares[k] - stored[k]) for k in stored),
+        "field_maxdiff_vs_reference_C": float(common.dt_K(known) * np.abs(theta - ref["theta"]).max()),
+        "ranking": sorted(common.ROBIN_WALLS, key=lambda w: -shares[w]),
+    }
+
+
+def _sensor_residuals_C(pred_theta, obs, known):
+    return common.dt_K(known) * (np.asarray(pred_theta) - obs.theta)
+
+
+def run_e5(data_name=E5_DATA, seed=0, overwrite=False):
+    """Fixed-config fit of the SIMPLE model to model-mismatch data (no draft or k(x, y) given).
+
+    Reports Q1 against the mismatch reference, Bi (same walls, k = 1 there), heater-relative
+    wall shares with the draft listed separately, and per-sensor residuals as a mismatch diagnostic.
+    """
+    _validate_e5_data(data_name)
+    import torch
+    try:
+        from . import pinn
+    except ImportError:
+        import src.pinn as pinn
+
+    known = common.load_known()
+    obs = common.load_observations(data_name, known)
+    data_file = f"sensors_{data_name}.csv"
+    run = f"{data_name}_seed{seed}"
+    out_dir = common.RESULTS_DIR / "e5" / run
+    fig_dir = common.RESULTS_DIR / "figures"
+    _claim_run_dir(out_dir, overwrite)
+    exp = {**pinn.DEFAULT_EXPERIMENT, **E2_EXPERIMENT, **E2_CONFIGS[E3_CONFIG], "seed": seed}
+
+    # ---- fitting: observations + known.json only; no truth file is opened in this block
+    xq, yq = np.linspace(0, 1, fd.FINE_NX), np.linspace(0, 0.8, 161)
+    Xq, Yq = np.meshgrid(xq, yq, indexing="ij")
+    query = np.c_[Xq.ravel(), Yq.ravel()]
+    t0 = time.perf_counter()
+    theta_rbf = baselines.reconstruct_rbf(obs.xy, obs.theta, query).reshape(Xq.shape)
+    rbf_time = time.perf_counter() - t0
+    fit = baselines.fit_fd_inverse(obs, known)
+    (out_dir / "fd_inverse_runs.json").write_text(json.dumps(common.to_jsonable(fit["runs"]), indent=2))
+    fd_ok = fit["status"] == "completed"
+    if fd_ok:
+        xc, yc, th_fd, info_fd = fd.solve_field(fit["Bi"], known, nx=fit["nx"])
+        theta_fd = fd.sample(xc, yc, th_fd, query).reshape(Xq.shape)
+        flows_fd = fd.heat_flows(info_fd)
+        resid_fd = _sensor_residuals_C(fd.sample(xc, yc, th_fd, obs.xy), obs, known)
+
+    torch.manual_seed(seed)
+    model = pinn.HeatPINN(known, hidden=exp["hidden"], depth=exp["depth"])
+    history, status = pinn.train(model, known, exp, obs=obs)
+    pinn.save_checkpoint(out_dir / "checkpoint.pt", model, exp, history, status,
+                         extra={"exp_id": "E5", "data_file": data_file, "config": E3_CONFIG})
+    bi_pinn = dict(zip(common.ROBIN_WALLS, model.bi().detach().tolist()))
+    flows_pinn = pinn.heat_flows(model, known)
+    theta_pinn = pinn.predict_grid(model, xq, yq)
+    with torch.no_grad():
+        resid_pinn = _sensor_residuals_C(model(torch.tensor(obs.xy, dtype=pinn.DTYPE)).numpy(), obs, known)
+
+    # ---- evaluation (truth access logged)
+    truth = _mismatch_truth(known, "E5 evaluation: mismatch truth flows (Bi_true, k(x,y), draft Q)")
+    ref = evaluate.load_reference(f"E5 evaluation: Q1 metrics ({data_file})", kind="mismatch_reference")
+    if not (np.allclose(ref["x"], xq) and np.allclose(ref["y"], yq)):
+        raise ValueError("reference grid differs from the evaluation query grid")
+    q1_cols = ("q1_rmse_C", "q1_maxabs_C", "q1_wall_rmse_C")
+
+    def method_metrics(bi_hat, flows):
+        # Shares relative to heater power: the simple model has no sink, so its wall shares
+        # sum to ~100 % while the truth walls sum to 90 % (draft 10 %). Not renormalised.
+        H = truth["heater_power"]
+        share = {w: flows["flux"][w] / H for w in common.ROBIN_WALLS}
+        m = {f"bi_{w}_hat": bi_hat[w] for w in common.ROBIN_WALLS}
+        m.update({f"bi_{w}_relerr": (bi_hat[w] - truth["Bi"][w]) / truth["Bi"][w] for w in common.ROBIN_WALLS})
+        m.update({f"flux_{w}": flows["flux"][w] for w in common.ROBIN_WALLS})
+        m.update({f"share_{w}_err_pp": 100 * (share[w] - truth["shares"][w]) for w in common.ROBIN_WALLS})
+        m["source_integral"] = flows["source_integral"]
+        m["ranking_correct"] = sorted(common.ROBIN_WALLS, key=lambda w: -share[w]) == truth["ranking"]
+        m["energy_balance_relerr"] = flows["energy_balance_relerr"]
+        return m, share
+
+    def resid_summary(r):
+        return {"per_sensor_C": r, "rms_C": float(np.sqrt(np.mean(r ** 2))), "maxabs_C": float(np.abs(r).max())}
+
+    q1_rbf = evaluate.q1_metrics(theta_rbf, ref, obs, known)
+    q1_pinn = evaluate.q1_metrics(theta_pinn, ref, obs, known)
+    m_pinn, share_pinn = method_metrics(bi_pinn, flows_pinn)
+    notes_common = "simple model fitted to mismatch data; shares = wall flow / heater power (truth walls sum 90%, draft 10%)"
+    rows = [
+        evaluate.metrics_row(exp_id="E5", method="RBF_tps", data_file=data_file, status="completed",
+                             n_unknown=0, wall_time_s=rbf_time, **{k: q1_rbf[k] for k in q1_cols},
+                             notes="Q1 only; smoothing=0"),
+        evaluate.metrics_row(exp_id="E5", method=f"PINN_inverse_{E3_CONFIG}", data_file=data_file, seed=seed,
+                             status=status["status"], n_unknown=3, wall_time_s=status.get("wall_time_s"),
+                             **m_pinn, **{k: q1_pinn[k] for k in q1_cols},
+                             notes=f"config {E3_CONFIG} fixed; {notes_common}"),
+    ]
+    summary = {
+        "exp_id": "E5", "run": run, "data_file": data_file, "environment": environment(),
+        "torch": torch.__version__, "pinn_config": E3_CONFIG, "experiment": exp,
+        "note": ("Simple model fitted to data from a richer model (variable k + window draft sink + "
+                 "sensor offsets 0.2 C + noise 0.1 C); effects are mixed. Single seed."),
+        "rbf": {"q1": q1_rbf, "wall_time_s": rbf_time},
+        "pinn": {"train_status": status, "bi_hat": bi_pinn, "q1": q1_pinn, "metrics": m_pinn,
+                 "shares_of_heater": share_pinn, "heat_flows": flows_pinn,
+                 "sensor_residuals": resid_summary(resid_pinn)},
+        "truth": truth,
+    }
+    fields = {"RBF (thin-plate)": theta_rbf}
+    shares_plot = {"Truth (mismatch model)": truth["shares"]}
+    if fd_ok:
+        q1_fd = evaluate.q1_metrics(theta_fd, ref, obs, known)
+        m_fd, share_fd = method_metrics(fit["Bi"], flows_fd)
+        rows.append(evaluate.metrics_row(
+            exp_id="E5", method="FD_inverse", data_file=data_file, status="completed", n_unknown=3,
+            wall_time_s=fit["wall_time_s"], **m_fd, **{k: q1_fd[k] for k in q1_cols},
+            notes=f"101x81 grid, {fit['n_converged']}/{len(fit['runs'])} starts converged; {notes_common}"))
+        summary["fd_inverse"] = {**{k: v for k, v in fit.items() if k != "runs"}, "q1": q1_fd, "metrics": m_fd,
+                                 "shares_of_heater": share_fd, "heat_flows": flows_fd,
+                                 "sensor_residuals": resid_summary(resid_fd)}
+        fields["FD-inverse"] = theta_fd
+        shares_plot["FD-inverse"] = share_fd
+    else:
+        rows.append(evaluate.metrics_row(exp_id="E5", method="FD_inverse", data_file=data_file,
+                                         status="failed", n_unknown=3, wall_time_s=fit["wall_time_s"],
+                                         notes=f"FD-inverse {fit.get('reason')}"))
+        summary["fd_inverse"] = {k: v for k, v in fit.items() if k != "runs"}
+    fields[f"PINN ({E3_CONFIG})"] = theta_pinn
+    shares_plot[f"PINN ({E3_CONFIG})"] = share_pinn
+    write_metrics(rows)
+    summary["status"] = "completed" if (status["status"] == "completed" and fd_ok) else "failed"
+    _write_summary(out_dir, summary)
+    (out_dir / "history.json").write_text(json.dumps(common.to_jsonable(history), indent=1))
+    plot_compare(ref, fields, obs, shares_plot, known, fig_dir / f"e5_{run}.png",
+                 f"E5 {run} — SIMPLE model fitted to mismatch data (variable k + draft + offsets + noise), "
+                 f"single seed, config {E3_CONFIG} fixed")
+    return summary
+
+
 def dT_rms(model, obs, known):
     import torch
     with torch.no_grad():
@@ -698,12 +881,12 @@ def dT_rms(model, obs, known):
 
 
 # Each experiment's own default data set (E3 is the noisy fixed-config test).
-DEFAULT_DATA = {"E0": "A_clean", "E2": "A_clean", "E3": "A_noisy"}
+DEFAULT_DATA = {"E0": "A_clean", "E2": "A_clean", "E3": "A_noisy", "E5": E5_DATA}
 
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--exp", required=True, choices=["E0", "E1", "E2", "E3"])
+    p.add_argument("--exp", required=True, choices=["E0", "E1", "E2", "E3", "E5"])
     p.add_argument("--data", default=None,
                    help="sensor data name; default per experiment: " +
                         ", ".join(f"{k}={v}" for k, v in DEFAULT_DATA.items()))
@@ -714,6 +897,11 @@ def main(argv=None):
     args = p.parse_args(argv)
     if args.data is None:
         args.data = DEFAULT_DATA.get(args.exp)
+    if args.exp == "E5":
+        try:
+            _validate_e5_data(args.data)
+        except ValueError as exc:
+            p.error(str(exc))
     try:
         _dispatch(args)
     except RunExistsError as exc:
@@ -722,6 +910,22 @@ def main(argv=None):
 
 
 def _dispatch(args):
+    if args.exp == "E5":
+        s = run_e5(args.data, args.seed, args.overwrite)
+        fdi = s["fd_inverse"]
+        print(json.dumps(common.to_jsonable({
+            "status": s["status"], "pinn_train_status": s["pinn"]["train_status"],
+            "truth_check": {k: s["truth"][k] for k in ("shares", "shares_config", "shares_maxdiff_vs_config",
+                                                       "field_maxdiff_vs_reference_C")},
+            "pinn_bi": s["pinn"]["bi_hat"], "pinn_metrics": s["pinn"]["metrics"], "pinn_q1": s["pinn"]["q1"],
+            "pinn_shares": s["pinn"]["shares_of_heater"],
+            "pinn_resid": {k: s["pinn"]["sensor_residuals"][k] for k in ("rms_C", "maxabs_C")},
+            "fd_bi": fdi.get("Bi"), "fd_metrics": fdi.get("metrics"), "fd_q1": fdi.get("q1"),
+            "fd_shares": fdi.get("shares_of_heater"),
+            "fd_resid": {k: fdi["sensor_residuals"][k] for k in ("rms_C", "maxabs_C")} if "sensor_residuals" in fdi else None,
+            "rbf_q1": s["rbf"]["q1"],
+        }), indent=2))
+        sys.exit(0 if s["status"] == "completed" else 2)
     if args.exp == "E3":
         s = run_e3(args.data, args.seed, args.overwrite)
         fdi = s["fd_inverse"]
