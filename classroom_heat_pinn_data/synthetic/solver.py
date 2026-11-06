@@ -43,6 +43,8 @@ def solve(nx, Bi, theta_inf, Q=None, heaters=None, k=None, g=None):
     k: callable k(X, Y) or None (k = 1).
     g: dict wall -> callable g(x_or_y) extra boundary flux (for MMS), or None.
     Returns x, y, theta (nx, ny), info dict.
+    info['loss'] contains the Robin flux only, for backward compatibility.
+    info['total_flux'] adds the prescribed g flux and is used for energy balance.
     """
     x, y, h = make_grid(nx)
     ny = len(y)
@@ -83,11 +85,14 @@ def solve(nx, Bi, theta_inf, Q=None, heaters=None, k=None, g=None):
     # boundary Robin fluxes: outflow = Bi*(theta - tinf)*length + g*length
     segs = {"S": (np.s_[:, 0], wx, x), "N": (np.s_[:, -1], wx, x),
             "W": (np.s_[0, :], wy, y), "E": (np.s_[-1, :], wy, y)}
+    boundary_forcing = {w: 0.0 for w in WALLS}
     for w, (sl, length, coord) in segs.items():
         diag[sl] += Bi[w] * length
         rhs[sl] += Bi[w] * tinf[w] * length
         if w in g:
-            rhs[sl] -= g[w](coord) * length
+            forcing = g[w](coord) * length
+            rhs[sl] -= forcing
+            boundary_forcing[w] = float(forcing.sum())
 
     rows.append(idx.ravel()); cols.append(idx.ravel()); vals.append(diag.ravel())
     M = sp.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
@@ -99,8 +104,12 @@ def solve(nx, Bi, theta_inf, Q=None, heaters=None, k=None, g=None):
     loss = {}
     for w, (sl, length, _) in segs.items():
         loss[w] = float((Bi[w] * (theta[sl] - tinf[w]) * length).sum())
+    total_flux = {w: loss[w] + boundary_forcing[w] for w in WALLS}
+    balance_abs_err = abs(q_in - sum(total_flux.values()))
     info = {"h": h, "q_in": q_in, "loss": loss,
-            "balance_rel_err": abs(q_in - sum(loss.values())) / max(abs(q_in), 1e-300),
+            "boundary_forcing": boundary_forcing, "total_flux": total_flux,
+            "balance_abs_err": balance_abs_err,
+            "balance_rel_err": balance_abs_err / max(abs(q_in), 1e-12),
             "Q": Q}
     return x, y, theta, info
 
@@ -113,7 +122,7 @@ def sample(x, y, field, pts):
 
 # ---------------------------------------------------------------- verification
 def mms_test(verbose=True):
-    """Method of manufactured solutions with variable k and Robin data on all walls."""
+    """Manufactured solution with variable k, Robin walls and a Neumann W wall."""
     a, b, c = 0.3, 0.1, 0.3
     p, q = np.pi, np.pi / LY
     th = lambda X, Y: 1 + a * np.cos(p * X) * np.cos(q * Y) + b * X
@@ -151,5 +160,5 @@ def mms_test(verbose=True):
 
 
 if __name__ == "__main__":
-    print("MMS test (variable k, Robin on all walls):")
+    print("MMS test (variable k, Robin and Neumann boundary forcing):")
     mms_test()

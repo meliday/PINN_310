@@ -1,55 +1,122 @@
-import json, time, numpy as np
-from solver import solve, sample
-from ident import LAYOUT_A
-kn=json.load(open('data/known.json')); TI=kn['theta_inf']; H=kn['heater']
-BI=np.array([1.0,0.4,0.25])
-def run(nx,Bi=BI,A=H['A'],k=None):
-    h=dict(H,A=A); return solve(nx,{"S":Bi[0],"E":Bi[1],"N":Bi[2]},TI,heaters=[h],k=k)
+"""Truth-based tool diagnostics, separate from fitting and training."""
 
-print("(a) convergence order on the ACTUAL problem (Robin-Neumann corners, truncated Gaussian)")
-sols={nx:run(nx)[2] for nx in (51,101,201,401)}
-d1=np.abs(sols[51]-sols[101][::2,::2]).max(); d2=np.abs(sols[101]-sols[201][::2,::2]).max(); d3=np.abs(sols[201]-sols[401][::2,::2]).max()
-print(f"   successive max diffs (degC): {20*d1:.2e} {20*d2:.2e} {20*d3:.2e}  -> orders {np.log2(d1/d2):.2f}, {np.log2(d2/d3):.2f}")
-# where is the largest error? (corner singularity check)
-e=np.abs(sols[201]-sols[401][::2,::2]); i,j=np.unravel_index(e.argmax(),e.shape); print(f"   largest 201-vs-401 diff at x={i/200:.3f}, y={j/200:.3f}")
-print(f"   estimated error of 201x161 reference (Richardson, p=2): {20*d3/3:.2e} degC")
+import argparse
+import json
+from pathlib import Path
+import time
 
-print("(b) Jacobian finite-difference step check")
-def J(pts,eps,params='Bi'):
-    out=[]
-    base=np.r_[BI,H['A']]
-    names=[0,1,2] if params=='Bi' else [0,1,2,3]
-    for p in names:
-        d=np.zeros(4); d[p]=eps*base[p]
-        u=run(101,Bi=(base+d)[:3],A=(base+d)[3]); v=run(101,Bi=(base-d)[:3],A=(base-d)[3])
-        out.append((sample(u[0],u[1],u[2],pts)-sample(v[0],v[1],v[2],pts))/(2*d[p])*base[p])
-    return np.array(out).T
-J1=J(LAYOUT_A,1e-4); J2=J(LAYOUT_A,1e-3)
-print(f"   max rel diff between eps=1e-4 and 1e-3: {np.abs(J1-J2).max()/np.abs(J1).max():.1e}")
-sv=np.linalg.svd(J1,compute_uv=False); print(f"   singular values (log-Bi sensitivities): {np.round(sv,4)}, condition number {sv[0]/sv[-1]:.1f}")
+import numpy as np
 
-print("(c) identifiability if heater strength A is ALSO unknown (4 params)")
-J4=J(LAYOUT_A,1e-4,params='all'); C4=np.linalg.inv(J4.T@J4); sd4=np.sqrt(np.diag(C4))*0.1/20
-sv4=np.linalg.svd(J4,compute_uv=False)
-print(f"   rel std @0.1C (Bi_S, Bi_E, Bi_N, A): {np.round(sd4*100,1)}%, condition number {sv4[0]/sv4[-1]:.1f}")
-corr=C4/np.sqrt(np.outer(np.diag(C4),np.diag(C4))); print("   corr(A, Bi_S/E/N):",np.round(corr[3,:3],3))
+if __package__:
+    from .solver import solve, sample
+    from .ident import LAYOUT_A, covariance_from_jacobian
+else:
+    from solver import solve, sample
+    from ident import LAYOUT_A, covariance_from_jacobian
 
-print("(d) global uniqueness scan of the noise-free misfit (self-consistent 51x41 grid, layout A)")
-t=time.time()
-xs,ys,Tt,_=run(51); ix=np.rint(LAYOUT_A[:,0]*50).astype(int); iy=np.rint(LAYOUT_A[:,1]*50).astype(int); obs=Tt[ix,iy]
-g=np.exp(np.linspace(np.log(0.05),np.log(10),14))
-best=[]
-for a in g:
-  for b in g:
-    for c in g:
-      T=run(51,Bi=np.array([a,b,c]))[2]; best.append((np.sqrt(np.mean((T[ix,iy]-obs)**2))*20,a,b,c))
-best.sort()
-print(f"   {len(best)} grid points in Bi in [0.05,10]^3 ({time.time()-t:.0f}s). Lowest misfits (degC RMS):")
-for r in best[:5]: print(f"     {r[0]:.4f}  Bi=({r[1]:.3f},{r[2]:.3f},{r[3]:.3f})")
-# any distant point with small misfit?
-far=[r for r in best if max(abs(np.log(r[1]/1.0)),abs(np.log(r[2]/0.4)),abs(np.log(r[3]/0.25)))>np.log(2)]
-print(f"   smallest misfit among points >2x away from truth in some Bi: {far[0][0]:.3f} degC at Bi=({far[0][1]:.2f},{far[0][2]:.2f},{far[0][3]:.2f})")
 
-print("(e) mismatch model: k on the walls")
-LY=0.8; Kv=lambda X,Y: 1+0.25*np.sin(2*np.pi*X)*np.sin(np.pi*Y/LY)
-s=np.linspace(0,1,11); print("   k on S,N,W,E walls max|k-1|:", max(np.abs(Kv(s,0*s)-1).max(),np.abs(Kv(s,LY+0*s)-1).max(),np.abs(Kv(0*s,s*LY)-1).max(),np.abs(Kv(1+0*s,s*LY)-1).max()))
+DEFAULT_DATA = Path(__file__).resolve().parent / "data"
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA)
+    parser.add_argument("--skip-global-scan", action="store_true")
+    parser.add_argument("--scan-points", type=int, default=14,
+                        help="Values per Bi axis in the optional coarse-grid scan")
+    args = parser.parse_args(argv)
+    if args.scan_points < 2:
+        parser.error("--scan-points must be at least 2")
+    data_dir = args.data_dir.resolve()
+    known = json.loads((data_dir / "known.json").read_text())
+    truth_path = data_dir / "config.json"
+    truth = json.loads(truth_path.read_text())
+    print(f"TOOL DIAGNOSTIC ONLY; truth access: {truth_path}")
+    BI = np.array([truth["Bi_true"][w] for w in "SEN"])
+    H, TI = known["heater"], known["theta_inf"]
+    dT = known["temperature_scaling"]["DT_K"]
+
+    def run(nx, Bi=BI, A=H["A"], k=None):
+        return solve(nx, dict(zip("SEN", Bi)), TI, heaters=[dict(H, A=A)], k=k)
+
+    print("(a) actual-problem convergence (Robin-Neumann corners, truncated Gaussian)")
+    sols = {nx: run(nx)[2] for nx in (51, 101, 201, 401)}
+    differences = [np.abs(sols[nx] - sols[2 * nx - 1][::2, ::2]).max()
+                   for nx in (51, 101, 201)]
+    d1, d2, d3 = differences
+    print(f"   successive max diffs (degC): {dT*d1:.2e} {dT*d2:.2e} {dT*d3:.2e}"
+          f" -> orders {np.log2(d1/d2):.2f}, {np.log2(d2/d3):.2f}")
+    e = np.abs(sols[201] - sols[401][::2, ::2])
+    i, j = np.unravel_index(e.argmax(), e.shape)
+    print(f"   largest 201-vs-401 diff at x={i/200:.3f}, y={j/200:.3f}")
+    print(f"   estimated reference error (Richardson, p=2): {dT*d3/3:.2e} degC")
+
+    def jacobian(pts, eps, include_A=False):
+        base = np.r_[BI, H["A"]]
+        columns = []
+        for p in range(4 if include_A else 3):
+            d = np.zeros(4)
+            d[p] = eps * base[p]
+            up = run(101, Bi=(base + d)[:3], A=(base + d)[3])
+            dn = run(101, Bi=(base - d)[:3], A=(base - d)[3])
+            columns.append((sample(*up[:3], pts) - sample(*dn[:3], pts))
+                           / (2 * d[p]) * base[p])
+        return np.array(columns).T
+
+    print("(b) Jacobian finite-difference step check")
+    J1, J2 = jacobian(LAYOUT_A, 1e-4), jacobian(LAYOUT_A, 1e-3)
+    print(f"   max rel diff, eps=1e-4 vs 1e-3: {np.abs(J1-J2).max()/np.abs(J1).max():.1e}")
+    C3, diag3 = covariance_from_jacobian(J1, sigma=0.1 / dT)
+    print(f"   log-Bi Jacobian rank {diag3['rank']}/3; singular values "
+          f"{np.round(diag3['singular_values'], 4)}; condition {diag3['condition_number']:.1f}")
+    if C3 is not None:
+        print("   rel std @0.1C (Bi_S, Bi_E, Bi_N):", np.round(np.sqrt(np.diag(C3))*100, 1))
+    else:
+        print("   covariance unavailable: rank-deficient Jacobian")
+
+    print("(c) identifiability with heater strength A also unknown (4 params)")
+    C4, diag4 = covariance_from_jacobian(jacobian(LAYOUT_A, 1e-4, include_A=True),
+                                       sigma=0.1 / dT)
+    print(f"   Jacobian rank {diag4['rank']}/4; singular values "
+          f"{np.round(diag4['singular_values'], 4)}; condition {diag4['condition_number']:.1f}")
+    if C4 is not None:
+        print("   rel std @0.1C (Bi_S, Bi_E, Bi_N, A):", np.round(np.sqrt(np.diag(C4))*100, 1))
+        corr = C4 / np.sqrt(np.outer(np.diag(C4), np.diag(C4)))
+        print("   corr(A, Bi_S/E/N):", np.round(corr[3, :3], 3))
+    else:
+        print("   covariance unavailable: rank-deficient Jacobian")
+
+    if args.skip_global_scan:
+        print("(d) coarse-grid scan: not_run (--skip-global-scan)")
+    else:
+        print("(d) coarse-grid misfit scan; not a global uniqueness proof")
+        t = time.perf_counter()
+        xs, ys, Tt, _ = run(51)
+        obs = sample(xs, ys, Tt, LAYOUT_A)
+        grid = np.geomspace(0.05, 10, args.scan_points)
+        best = []
+        for a in grid:
+            for b in grid:
+                for c in grid:
+                    x, y, T, _ = run(51, Bi=np.array([a, b, c]))
+                    rms = dT * np.sqrt(np.mean((sample(x, y, T, LAYOUT_A) - obs) ** 2))
+                    best.append((rms, a, b, c))
+        best.sort()
+        print(f"   {len(best)} points in [0.05,10]^3, {time.perf_counter()-t:.1f}s;"
+              " bilinear sampling at original sensor coordinates")
+        for row in best[:5]:
+            print(f"   {row[0]:.4f} degC RMS, Bi=({row[1]:.3f},{row[2]:.3f},{row[3]:.3f})")
+        far = [row for row in best if np.max(np.abs(np.log(np.array(row[1:]) / BI))) > np.log(2)]
+        if far:
+            print(f"   smallest misfit at a scanned point >2x away: {far[0][0]:.3f} degC")
+
+    print("(e) mismatch model: k on walls")
+    LY = known["domain"]["LY"]
+    Kv = lambda X, Y: 1 + 0.25 * np.sin(2*np.pi*X) * np.sin(np.pi*Y/LY)
+    s = np.linspace(0, 1, 11)
+    print("   max|k-1|:", max(np.abs(Kv(s, 0*s)-1).max(), np.abs(Kv(s, LY+0*s)-1).max(),
+                              np.abs(Kv(0*s, s*LY)-1).max(), np.abs(Kv(1+0*s, s*LY)-1).max()))
+
+
+if __name__ == "__main__":
+    main()

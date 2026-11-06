@@ -13,4 +13,24 @@
 - `clean/intel_mote_locs.csv`: mote x, y in metres.
 - At 02–04 h, 24 motes have ≥ 80 % coverage; the median spatial spread is 3.1 °C.
 
-Run: `python prepare_real.py` (expects `medellin/` with the .mat + Time*.xlsx files and `intel/` with data.txt.gz + mote_locs.txt).
+The checked-in `clean/` files are preserved snapshots. From the repository root:
+
+```bash
+# Intel only: NumPy, SciPy, pandas >= 2; no openpyxl required.
+python -B -m classroom_heat_pinn_data.real.prepare_real --dataset intel --output-dir /tmp/heat-intel-new
+# All data: additionally requires openpyxl for Time*.xlsx.
+python -B -m classroom_heat_pinn_data.real.prepare_real --dataset all --output-dir /tmp/heat-real-new
+```
+
+Use unused output paths. The default is `real/prepared/`, separate from `clean/`.
+Existing output files cause an error before processing; they are not overwritten.
+`--source-dir` can select a different root containing `medellin/` and `intel/`.
+Default paths are based on the script location, so direct script execution also
+works from other working directories. Importing the module performs no data I/O.
+
+Intel accepts `data.txt.gz` or uncompressed `data.txt` (preferring `.gz` if both
+are present), alongside `mote_locs.txt`. Mixed whole-second/fractional-second
+timestamps are parsed explicitly. The previous parser dropped four valid
+timestamp rows in the supplied raw file; new outputs can therefore differ from
+the preserved `clean/` snapshot. This is a preprocessing correction, not a change
+to the raw observations. See `../CODE_FIXES.md` for validation and limitations.
