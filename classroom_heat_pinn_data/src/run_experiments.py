@@ -158,14 +158,29 @@ def _write_summary(out_dir, summary):
     (out_dir / "summary.json").write_text(json.dumps(common.to_jsonable(summary), indent=2))
 
 
-def run_e0(data_name="A_clean"):
+class RunExistsError(RuntimeError):
+    """A run directory already holds results and overwrite was not requested."""
+
+
+def _claim_run_dir(out_dir, overwrite=False):
+    """Create the run directory, refusing one that already holds results.
+
+    Called before any fitting, so a rerun (successful or failed) cannot silently replace
+    an earlier run's checkpoint, summary, figure or metrics row. overwrite=True replaces it.
+    """
+    if out_dir.exists() and any(out_dir.iterdir()) and not overwrite:
+        raise RunExistsError(f"{out_dir} already holds results; pass --overwrite to replace them")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (common.RESULTS_DIR / "figures").mkdir(parents=True, exist_ok=True)
+
+
+def run_e0(data_name="A_clean", overwrite=False):
     known = common.load_known()
     obs = common.load_observations(data_name, known)
     data_file = f"sensors_{data_name}.csv"
     out_dir = common.RESULTS_DIR / "e0" / data_name
     fig_dir = common.RESULTS_DIR / "figures"
-    for d in (out_dir, fig_dir):
-        d.mkdir(parents=True, exist_ok=True)
+    _claim_run_dir(out_dir, overwrite)
     summary = {"exp_id": "E0", "data_file": data_file, "environment": environment(),
                "note": "Simplified 2D model, synthetic data. E0 is a tool/baseline check, "
                        "not a PINN result."}
@@ -275,7 +290,7 @@ def plot_e1(ref, theta_hat, history, known, fig_path, title):
     plt.close(fig)
 
 
-def run_e1(seed=0):
+def run_e1(seed=0, overwrite=False):
     """Forward PINN with the true Bi fixed. Diagnostic only: truth is an input here."""
     import torch
     try:
@@ -287,8 +302,7 @@ def run_e1(seed=0):
     run = f"forward_seed{seed}"
     out_dir = common.RESULTS_DIR / "e1" / run
     fig_dir = common.RESULTS_DIR / "figures"
-    for d in (out_dir, fig_dir):
-        d.mkdir(parents=True, exist_ok=True)
+    _claim_run_dir(out_dir, overwrite)
     exp = {**pinn.DEFAULT_EXPERIMENT, **E1_EXPERIMENT, "seed": seed}
 
     bi_true = evaluate.load_truth_bi("E1 forward diagnostic: true Bi fixed in the PINN (input)")
@@ -401,11 +415,11 @@ def plot_e2(ref, theta_hat, obs, history, bi_true, known, fig_path, title):
     plt.close(fig)
 
 
-def run_e2(data_name="A_clean", seed=0, config="base"):
+def run_e2(data_name="A_clean", seed=0, config="base", overwrite=False):
     """Inverse PINN: fresh network, beta = 0, observations + known only during training.
 
-    config 'base' keeps the original run name and metrics method; others get a tag so
-    earlier runs are never overwritten.
+    config 'base' keeps the original run name and metrics method; others get a tag.
+    An existing run with the same name is refused unless overwrite=True.
     """
     import torch
     try:
@@ -421,8 +435,7 @@ def run_e2(data_name="A_clean", seed=0, config="base"):
     method = f"PINN_inverse{tag}"
     out_dir = common.RESULTS_DIR / "e2" / run
     fig_dir = common.RESULTS_DIR / "figures"
-    for d in (out_dir, fig_dir):
-        d.mkdir(parents=True, exist_ok=True)
+    _claim_run_dir(out_dir, overwrite)
     exp = {**pinn.DEFAULT_EXPERIMENT, **E2_EXPERIMENT, **E2_CONFIGS[config], "seed": seed}
 
     # ---- training: no truth file is opened in this block
@@ -501,9 +514,19 @@ def main(argv=None):
     p.add_argument("--data", default="A_clean")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--config", default="base", choices=sorted(E2_CONFIGS), help="E2 config")
+    p.add_argument("--overwrite", action="store_true",
+                   help="replace an existing run's results (refused by default)")
     args = p.parse_args(argv)
+    try:
+        _dispatch(args)
+    except RunExistsError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        sys.exit(3)
+
+
+def _dispatch(args):
     if args.exp == "E2":
-        s = run_e2(args.data, args.seed, args.config)
+        s = run_e2(args.data, args.seed, args.config, args.overwrite)
         print(json.dumps(common.to_jsonable({
             "status": s["status"], "train_status": s["train_status"], "bi_hat": s["bi_hat"],
             "targets_met": s["targets_met"], "metrics": s["metrics"], "q1": s["q1"],
@@ -513,7 +536,7 @@ def main(argv=None):
         }), indent=2))
         sys.exit(0 if s["status"] == "completed" else 2)
     if args.exp == "E1":
-        s = run_e1(args.seed)
+        s = run_e1(args.seed, args.overwrite)
         print(json.dumps(common.to_jsonable({
             "status": s["status"], "train_status": s["train_status"], "field": s["field"],
             "targets_met": s["targets_met"],
@@ -524,7 +547,7 @@ def main(argv=None):
         }), indent=2))
         sys.exit(0 if s["status"] == "completed" else 2)
     if args.exp == "E0":
-        s = run_e0(args.data)
+        s = run_e0(args.data, args.overwrite)
         if s["status"] != "completed":
             print(json.dumps(common.to_jsonable({"status": s["status"], "reason": s["reason"],
                                                  "tool_checks_passed": s["tool_checks"]["passed"]}),
