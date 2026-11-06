@@ -1,6 +1,8 @@
 """PINN unit checks (plan section 13, items 1-3): derivatives, wall normals, beta gradients."""
 
+import itertools
 import unittest
+from unittest import mock
 
 import numpy as np
 import torch
@@ -135,6 +137,74 @@ class BetaGradientTests(unittest.TestCase):
                                                 "log_every": 1, "seed": 7}, obs=obs)
             runs.append([h["loss"] for h in hist])
         self.assertEqual(runs[0], runs[1])
+
+
+SMALL = {"n_interior": 40, "n_wall": 8, "log_every": 1, "hidden": 8, "depth": 1}
+
+
+class TrainingLoopTests(unittest.TestCase):
+    """Regression tests for LOG-014 (PINN-FINITE-01, -BUDGET-01, -SAMPLING-01, -STAGE-01)."""
+
+    def setUp(self):
+        self.known = common.load_known()
+        torch.manual_seed(0)
+        self.model = pinn.HeatPINN(self.known, hidden=8, depth=1)
+
+    def test_nan_from_last_adam_update_fails(self):
+        def nan_step(opt, *args, **kwargs):
+            with torch.no_grad():
+                for g in opt.param_groups:
+                    for p in g["params"]:
+                        p.fill_(float("nan"))
+
+        with mock.patch.object(torch.optim.Adam, "step", autospec=True, side_effect=nan_step):
+            _, status = pinn.train(self.model, self.known, {**SMALL, "adam_steps": 1})
+        self.assertEqual(status["status"], "failed")
+        self.assertIn("non-finite", status["reason"])
+
+    def test_exhausted_budget_skips_lbfgs(self):
+        with mock.patch.object(torch.optim.LBFGS, "step") as lbfgs_step:
+            _, status = pinn.train(self.model, self.known,
+                                   {**SMALL, "adam_steps": 3, "lbfgs_iters": 5, "time_budget_s": 1e-9})
+        lbfgs_step.assert_not_called()
+        self.assertEqual(status["adam_steps_done"], 1)
+        self.assertEqual(status["stage"], "adam")
+        self.assertIn("skipped", status["lbfgs"])
+
+    def test_budget_inside_lbfgs_restores_pre_lbfgs_parameters(self):
+        # Fake clock: each perf_counter call advances 1 ms, so Adam (2 steps) fits in a
+        # 10 ms budget and the L-BFGS closure hits it after a few evaluations.
+        def run(lbfgs_iters):
+            torch.manual_seed(0)
+            model = pinn.HeatPINN(self.known, hidden=8, depth=1)
+            ticks = itertools.count()
+            with mock.patch.object(pinn.time, "perf_counter", lambda: next(ticks) * 1e-3):
+                _, status = pinn.train(model, self.known, {**SMALL, "adam_steps": 2,
+                                                          "lbfgs_iters": lbfgs_iters,
+                                                          "time_budget_s": 0.010})
+            return model, status
+
+        aborted, status = run(50)
+        reference, _ = run(0)
+        self.assertEqual(status["status"], "completed")
+        self.assertIn("aborted", status["lbfgs"])
+        self.assertEqual(status["reason"], "L-BFGS stopped by time budget")
+        for p, q in zip(aborted.parameters(), reference.parameters()):
+            torch.testing.assert_close(p, q, atol=0, rtol=0)
+
+    def test_stage_reports_lbfgs_after_lbfgs(self):
+        history, status = pinn.train(self.model, self.known, {**SMALL, "adam_steps": 2, "lbfgs_iters": 2})
+        self.assertEqual(status["stage"], "lbfgs")
+        self.assertEqual(status["lbfgs"], "completed")
+        self.assertEqual(history[-1]["stage"], "lbfgs")
+
+    def test_zero_heater_fraction_is_pure_uniform(self):
+        gen = torch.Generator().manual_seed(0)
+        pts = pinn.sample_interior(37, self.known, gen, heater_frac=0.0)
+        self.assertEqual(pts.shape, (37, 2))
+        self.assertEqual(pinn.sample_interior(37, self.known, gen, heater_frac=1.0).shape, (37, 2))
+        with self.assertRaises(ValueError):
+            pinn.sample_interior(10, self.known, gen, heater_frac=1.5)
 
 
 if __name__ == "__main__":

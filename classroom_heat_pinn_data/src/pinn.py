@@ -120,9 +120,13 @@ def bc_residuals(model, wall_pts):
 
 # ------------------------------------------------------------------ sampling
 def sample_interior(n, known, gen, heater_frac=0.3):
+    if not 0.0 <= heater_frac <= 1.0:
+        raise ValueError(f"heater_frac must be in [0, 1], got {heater_frac}")
     LX, LY = known["domain"]["LX"], known["domain"]["LY"]
     n_h = int(round(heater_frac * n))
     uni = torch.rand(n - n_h, 2, generator=gen, dtype=DTYPE) * torch.tensor([LX, LY], dtype=DTYPE)
+    if n_h == 0:
+        return uni
     h = known["heater"]
     pts = []
     while sum(len(p) for p in pts) < n_h:  # Gaussian around the heater, rejected outside
@@ -218,6 +222,10 @@ def predict_grid(model, x, y, batch=20000):
 
 
 # ------------------------------------------------------------------ training
+class _BudgetExceeded(Exception):
+    pass
+
+
 def _finite(*tensors):
     return all(bool(torch.isfinite(t).all()) for t in tensors)
 
@@ -243,9 +251,14 @@ def train(model, known, experiment=None, obs=None, on_log=None):
         groups.append({"params": [model.beta], "lr": exp["lr_beta"]})
     opt = torch.optim.Adam(groups)
 
+    # status["stage"] is the last optimizer that ran ("adam" or "lbfgs").
     history, status = [], {"status": "completed", "stage": "adam", "reason": None}
     t0 = time.perf_counter()
     interior = walls = None
+    budget = exp["time_budget_s"]
+
+    def over_budget():
+        return bool(budget) and time.perf_counter() - t0 > budget
 
     def log(step, stage, total, parts):
         g = model.beta.grad if model.inverse and model.beta.grad is not None else None
@@ -275,30 +288,47 @@ def train(model, known, experiment=None, obs=None, on_log=None):
         if step % exp["log_every"] == 0:
             log(step, "adam", total.detach(), {k: v.detach() for k, v in parts.items()})
         opt.step()
-        if exp["time_budget_s"] and time.perf_counter() - t0 > exp["time_budget_s"]:
+        if over_budget():
             status.update(reason=f"adam stopped by time budget at step {step + 1}")
             break
     status["adam_steps_done"] = step + 1
+    params = [p for grp in groups for p in grp["params"]]
 
-    if exp["lbfgs_iters"]:
-        params = [p for grp in groups for p in grp["params"]]
+    # The time budget covers the whole run: L-BFGS starts only if budget remains and
+    # its closure re-checks it. An aborted L-BFGS restores the pre-L-BFGS parameters,
+    # since a line search can stop at an unevaluated trial point.
+    if exp["lbfgs_iters"] and over_budget():
+        status["lbfgs"] = "skipped: time budget exhausted"
+    elif exp["lbfgs_iters"]:
+        status["stage"] = "lbfgs"
+        saved = [p.detach().clone() for p in params]
         lbfgs = torch.optim.LBFGS(params, lr=1.0, max_iter=exp["lbfgs_iters"],
                                   line_search_fn="strong_wolfe")
 
         def closure():  # collocation fixed during L-BFGS -> deterministic closure
+            if over_budget():
+                raise _BudgetExceeded
             lbfgs.zero_grad()
             tot, _ = losses(model, known, interior, walls, obs_xy, obs_theta, exp)
             tot.backward()
             return tot
 
-        lbfgs.step(closure)
-        total, parts = losses(model, known, interior, walls, obs_xy, obs_theta, exp)
-        if not (torch.isfinite(total) and _finite(*params)):
-            status = {"status": "failed", "stage": "lbfgs", "reason": "non-finite after L-BFGS"}
-        log(step + 1, "lbfgs", total.detach(), {k: v.detach() for k, v in parts.items()})
-    else:
-        total, parts = losses(model, known, interior, walls, obs_xy, obs_theta, exp)
-        log(step + 1, "final", total.detach(), {k: v.detach() for k, v in parts.items()})
+        try:
+            lbfgs.step(closure)
+            status["lbfgs"] = "completed"
+        except _BudgetExceeded:
+            with torch.no_grad():
+                for p, v in zip(params, saved):
+                    p.copy_(v)
+            status["lbfgs"] = "aborted: time budget exhausted; parameters restored to pre-L-BFGS"
+            status["reason"] = "L-BFGS stopped by time budget"
+
+    # Final check after the last update of either optimizer.
+    total, parts = losses(model, known, interior, walls, obs_xy, obs_theta, exp)
+    final_stage = "lbfgs" if status.get("lbfgs") == "completed" else "final"
+    log(step + 1, final_stage, total.detach(), {k: v.detach() for k, v in parts.items()})
+    if not (torch.isfinite(total) and _finite(*params)):
+        status.update(status="failed", reason=f"non-finite loss or parameter after {status['stage']}")
 
     status["wall_time_s"] = time.perf_counter() - t0
     status["device"] = "cpu"
