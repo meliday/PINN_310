@@ -1,0 +1,183 @@
+{
+  "exp_id": "E0",
+  "data_file": "sensors_A_clean.csv",
+  "environment": {
+    "python": "3.12.13",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "platform": "macOS-27.0.1-arm64-arm-64bit",
+    "machine": "arm64"
+  },
+  "note": "Simplified 2D model, synthetic data. E0 is a tool/baseline check, not a PINN result.",
+  "tool_checks": {
+    "mms_h": [
+      0.04,
+      0.02,
+      0.01,
+      0.005
+    ],
+    "mms_max_error": [
+      0.0003505470906904895,
+      8.762607248580245e-05,
+      2.1885512687225273e-05,
+      5.470066406165763e-06
+    ],
+    "mms_observed_order": [
+      2.000176159487391,
+      2.0013840161122074,
+      2.000345928324184
+    ],
+    "energy_relerr_101": 1.057726949314554e-13,
+    "energy_relerr_201": 2.5109407086255973e-13,
+    "refinement_maxdiff_C": 0.0039750849439235125,
+    "reference_axes_match": true,
+    "reference_reproduction_maxdiff_C": 5.688782778179302e-12,
+    "reference_T_equals_DT_theta_maxdiff_C": 0.0,
+    "sample_vs_node_maxdiff_101": 1.1102230246251565e-16,
+    "sample_vs_node_maxdiff_201": 1.1102230246251565e-16,
+    "reference_vs_csv_maxdiff_C": 9.631038997426344e-06,
+    "swapped_xy_maxdiff_C": 14.21992764756149,
+    "passed": {
+      "mms_order_gt_1.8": true,
+      "energy_lt_1e-8": true,
+      "refinement_lt_0.01C": true,
+      "reference_reproduced_lt_1e-6C": true,
+      "csv_matches_reference_lt_1e-4C": true
+    }
+  },
+  "rbf": {
+    "q1": {
+      "q1_rmse_C": 0.5126082551431947,
+      "q1_maxabs_C": 2.5037742892265347,
+      "q1_wall_rmse_C": 0.8099885468270638,
+      "q1_rmse_in_hull_C": 0.14679181299546523,
+      "q1_rmse_out_hull_C": 0.723325089675143,
+      "frac_out_hull": 0.4808506692219715,
+      "n_eval_points": 32351
+    },
+    "wall_time_s": 0.0024452089855913073
+  },
+  "fd_inverse": {
+    "status": "completed",
+    "Bi": {
+      "S": 0.999929696550996,
+      "E": 0.4000274631118441,
+      "N": 0.2497388775534207
+    },
+    "beta": [
+      -7.030592040735883e-05,
+      -0.9162220764513822,
+      -1.3873393967657943
+    ],
+    "selected_start": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "sensor_rms_C": 6.496000972244693e-05,
+    "sensor_maxabs_C": 0.00013297644551046872,
+    "jacobian": {
+      "rank": 3,
+      "singular_values": [
+        1.404267829414947,
+        0.13710908531110333,
+        0.06175033759059084
+      ],
+      "condition_number": 22.74105509714527
+    },
+    "total_solves": 213,
+    "wall_time_s": 2.1389561250107363,
+    "nx": 101,
+    "q1": {
+      "q1_rmse_C": 0.00045933722131327303,
+      "q1_maxabs_C": 0.00191781963176485,
+      "q1_wall_rmse_C": 0.0005169470689587996,
+      "q1_rmse_in_hull_C": 0.0002595116285107749,
+      "q1_rmse_out_hull_C": 0.0006050421719318339,
+      "frac_out_hull": 0.4808506692219715,
+      "n_eval_points": 32351
+    },
+    "heat_flows": {
+      "flux": {
+        "S": 0.6859914807004006,
+        "E": 0.22619791768132597,
+        "N": 0.09755565007466425
+      },
+      "source_integral": 1.0097450484565287,
+      "share_signed": {
+        "S": 0.6793709776036934,
+        "E": 0.22401488180317053,
+        "N": 0.0966141405929996
+      },
+      "share_outflow": {
+        "S": 0.6793709776037862,
+        "E": 0.22401488180320112,
+        "N": 0.09661414059301279
+      },
+      "inflow": {
+        "S": 0.0,
+        "E": 0.0,
+        "N": 0.0
+      },
+      "energy_balance_relerr": 1.3655892630443617e-13,
+      "ranking": [
+        "S",
+        "E",
+        "N"
+      ]
+    },
+    "metrics": {
+      "bi_S_hat": 0.999929696550996,
+      "bi_S_relerr": -7.030344900404994e-05,
+      "flux_S": 0.6859914807004006,
+      "share_S_err_pp": 0.004587198343453114,
+      "bi_E_hat": 0.4000274631118441,
+      "bi_E_relerr": 6.865777961023722e-05,
+      "flux_E": 0.22619791768132597,
+      "share_E_err_pp": 0.004385414979052316,
+      "bi_N_hat": 0.2497388775534207,
+      "bi_N_relerr": -0.0010444897863172153,
+      "flux_N": 0.09755565007466425,
+      "share_N_err_pp": -0.008972613311054867,
+      "source_integral": 1.0097450484565287,
+      "ranking_correct": true,
+      "energy_balance_relerr": 1.3655892630443617e-13
+    }
+  },
+  "truth": {
+    "Bi": {
+      "S": 1.0,
+      "E": 0.4,
+      "N": 0.25
+    },
+    "heat_flows_201": {
+      "flux": {
+        "S": 0.6860369960460582,
+        "E": 0.22618391362465676,
+        "N": 0.09765932347553224
+      },
+      "source_integral": 1.0098802331465007,
+      "share_signed": {
+        "S": 0.6793251056202588,
+        "E": 0.22397102765338,
+        "N": 0.09670386672611014
+      },
+      "share_outflow": {
+        "S": 0.6793251056204294,
+        "E": 0.22397102765343627,
+        "N": 0.09670386672613443
+      },
+      "inflow": {
+        "S": 0.0,
+        "E": 0.0,
+        "N": 0.0
+      },
+      "energy_balance_relerr": 2.5109407086255973e-13,
+      "ranking": [
+        "S",
+        "E",
+        "N"
+      ]
+    }
+  }
+}
