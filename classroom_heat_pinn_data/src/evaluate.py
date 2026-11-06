@@ -66,6 +66,8 @@ def q1_metrics(theta_hat, ref, obs, known):
     if nodes is None:
         raise ValueError("sensors are not on reference grid nodes")
     mask[nodes] = False
+    if "fluid" in ref:  # X1/X2 references: nodes inside solids are NaN and not evaluated
+        mask &= ref["fluid"].astype(bool)
     LX, LY = known["domain"]["LX"], known["domain"]["LY"]
     band = np.minimum.reduce([X, LX - X, Y, LY - Y]) <= WALL_BAND
     inside = Delaunay(obs.xy).find_simplex(np.c_[X.ravel(), Y.ravel()]).reshape(X.shape) >= 0
@@ -74,7 +76,7 @@ def q1_metrics(theta_hat, ref, obs, known):
     def rmse(m):
         return float(np.sqrt(np.mean(err[m] ** 2))) if m.any() else None
 
-    return {
+    out = {
         "q1_rmse_C": rmse(mask),
         "q1_maxabs_C": float(np.abs(err[mask]).max()),
         "q1_wall_rmse_C": rmse(mask & band),
@@ -83,6 +85,11 @@ def q1_metrics(theta_hat, ref, obs, known):
         "frac_out_hull": float((mask & ~inside).sum() / mask.sum()),
         "n_eval_points": int(mask.sum()),
     }
+    if "wall_tip" in ref:  # re-entrant wall tip: reported separately (numerical uncertainty is largest there)
+        tip = ref["wall_tip"].astype(bool)
+        out["q1_rmse_wall_tip_C"] = rmse(mask & tip)
+        out["q1_rmse_outside_wall_tip_C"] = rmse(mask & ~tip)
+    return out
 
 
 def true_heat_flows(known, purpose, nx=fd.FINE_NX):

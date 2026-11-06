@@ -112,3 +112,27 @@ That fitter is not included in these helpers. The project plan specifies a new
 Local linear uncertainty assumes an accurate model and Gaussian noise. Exceeding
 it alone does not establish optimization failure; noise realization, nonlinear
 effects, bias and model mismatch must also be considered.
+
+## Extension data (user-requested, plan section 17)
+
+Estimation code may read only each folder's `known_*.json` and `sensors_*.csv`;
+`config_*.json` and `reference_*.npz` are ground truth for generation and evaluation
+(registered in `src/common.py`, reads logged in `results/logs/truth_access.log`).
+Both generators refuse an existing non-empty output folder.
+
+- `e5b/` (`generate_e5b.py`): base model + one known-position Gaussian cooling sink at
+  (0.75, 0.03), s = 0.05, removing 10 % of heater power (unknown strength). Layout A,
+  clean and σ = 0.1 °C noisy (seed 2027). Truth on the 201 grid.
+- `x1/` (`generate_x1.py`, solver `solver_wall.py`): base model + one adiabatic internal
+  wall x ∈ [0, 0.6], y ∈ [0.30, 0.34] attached to the W wall (0.4-wide passage on the E side).
+  Heater amplitude unchanged, so the solid removes 2.06 % of the heater power. Truth solved
+  on nx = 1601 and stored at the 201-grid nodes with a fluid mask, a wall-tip mask (r < 0.1)
+  and the 801 solution for numerical uncertainty. The re-entrant wall tip limits grid
+  convergence (201↔401 max 0.065 °C, at the tip); 801↔1601 differs by 0.0018 °C at the
+  sensors. Layout A, clean and σ = 0.1 °C noisy (seed 2028). The region above the wall reaches
+  about 40 °C, which is not realistic for a classroom; the comparison basis (fixed amplitude
+  vs fixed effective heat input) is still to be decided before X2.
+- `x2/` (`generate_x2.py`): the X1 wall plus the E5b sink (strength unknown), the sink removing
+  10 % of the fluid heater power. Same truth/reference layout as `x1/`; noise seed 2029.
+- `solver_wall.py` rejects solids that are misaligned with the grid, reversed or zero-area,
+  that touch fluid only at a corner, or that leave a fluid region without a Robin boundary.

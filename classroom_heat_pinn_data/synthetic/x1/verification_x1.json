@@ -1,0 +1,23 @@
+{
+  "energy_balance_rel_err_1601": 3.28041391571326e-11,
+  "energy_balance_rel_err_101": 2.5932478313966476e-13,
+  "sensors_fluid_and_finite": true,
+  "csv_T_vs_DT_theta_maxdiff_C": 4.000000000026205e-05,
+  "csv_clean_vs_truth_maxdiff_C": 9.417391032551237e-06,
+  "sensor_801_vs_1601_maxdiff_C": 0.0017991494740865477,
+  "heater_removed_by_wall_fraction": 0.0205655133374838,
+  "field_801_vs_1601_on_201_nodes_C": {
+    "max": 0.009726123704880685,
+    "rms": 0.0012096073677386563,
+    "max_outside_wall_tip": 0.002366418522683489
+  },
+  "min_theta": 0.40679937279981604,
+  "max_theta": 1.9880310995190744,
+  "passed": {
+    "energy_lt_1e-8": true,
+    "sensors_fluid_and_finite": true,
+    "csv_units_within_1e-4C": true,
+    "sensor_801_vs_1601_le_0.005C": true,
+    "heater_removed_in_0.019_0.022": true
+  }
+}

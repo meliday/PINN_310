@@ -1,0 +1,120 @@
+{
+  "exp_id": "X1",
+  "run": "forward_seed0",
+  "status": "completed",
+  "environment": {
+    "python": "3.12.13",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "platform": "macOS-27.0.1-arm64-arm-64bit",
+    "machine": "arm64"
+  },
+  "torch": "2.13.0",
+  "preregistration": "LOG-083",
+  "note": "Diagnostic forward solve with the TRUE Bi fixed (truth used as input), internal wall known. Not an inverse result; its weights are not reused by X1-d.",
+  "experiment": {
+    "seed": 0,
+    "hidden": 64,
+    "depth": 4,
+    "n_interior": 1000,
+    "n_wall": 100,
+    "heater_frac": 0.3,
+    "lr_net": 0.001,
+    "lr_beta": 0.003,
+    "adam_steps": 20000,
+    "resample_every": 500,
+    "lbfgs_iters": 100,
+    "lambda_pde": 1.0,
+    "lambda_bc": 1.0,
+    "lambda_data": 0.0,
+    "log_every": 100,
+    "time_budget_s": null,
+    "threads": null
+  },
+  "train_status": {
+    "status": "completed",
+    "stage": "lbfgs",
+    "reason": null,
+    "adam_steps_done": 20000,
+    "lbfgs": "completed",
+    "wall_time_s": 342.43888975001755,
+    "device": "cpu",
+    "threads": 8,
+    "dtype": "torch.float64"
+  },
+  "targets": {
+    "rel_l2_max": 0.01,
+    "energy_relerr_max": 0.01
+  },
+  "targets_met": {
+    "rel_l2": false,
+    "energy": false
+  },
+  "field": {
+    "rel_l2": 0.53674061921414,
+    "rmse_C": 13.315837909239585,
+    "maxabs_C": 24.247548386243896,
+    "rmse_wall_tip_C": 9.176251293274149,
+    "rmse_outside_wall_tip_C": 13.481199731204443,
+    "reference_801_vs_1601_maxabs_C": 0.009726123704880685,
+    "n_eval_points": 31521
+  },
+  "wall_neumann_residual_rms": 0.49409826637482035,
+  "wall_flux_over_source": -0.016137533268576008,
+  "heat_flows": {
+    "flux": {
+      "S": 0.4912925987536221,
+      "N": -0.01092104025017817,
+      "E": 0.13805435333810645
+    },
+    "flux_grad": {
+      "S": 0.3976192830438159,
+      "N": 0.2867072945943337,
+      "W": 0.12090665602243136,
+      "E": 0.19128014490863732,
+      "X": -0.015984094940440483
+    },
+    "source_integral": 0.9904918350542268,
+    "share_signed": {
+      "S": 0.49600873158810554,
+      "N": -0.011025876098797191,
+      "E": 0.13937959754160753
+    },
+    "share_outflow": {
+      "S": 0.7806387194229475,
+      "N": 0.0,
+      "E": 0.21936128057705245
+    },
+    "inflow": {
+      "S": 0.0,
+      "N": -0.01092104025017817,
+      "E": 0.0
+    },
+    "energy_balance_relerr": 0.3756375469690841,
+    "gradient_balance_relerr": 0.01005818632003521,
+    "ranking": [
+      "S",
+      "E",
+      "N"
+    ]
+  },
+  "share_err_pp": {
+    "S": -2.8124405703186417,
+    "E": -13.490732359327154,
+    "N": -21.260581770543038
+  },
+  "truth": {
+    "Bi": {
+      "S": 1.0,
+      "E": 0.4,
+      "N": 0.25
+    },
+    "wall_flow_share_of_heater": {
+      "S": 0.524133137291292,
+      "E": 0.27428692113487907,
+      "N": 0.2015799416066332
+    },
+    "heater_power_fluid": 0.9891549710537592
+  },
+  "n_parameters": 12737
+}

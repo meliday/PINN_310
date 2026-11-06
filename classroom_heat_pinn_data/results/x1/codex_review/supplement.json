@@ -1,0 +1,19 @@
+{
+  "exact_heater_power_no_wall": 1.0099252926993056,
+  "exact_heater_power_with_wall": 0.9891557404314928,
+  "removed_heater_fraction": 0.020565434312770227,
+  "nonseparable_MMS_errors": [
+    0.0007611668554250439,
+    0.00018977028839173293,
+    4.7391016663178576e-05,
+    1.1842938606676512e-05
+  ],
+  "nonseparable_MMS_orders": [
+    2.003958608855377,
+    2.00156861673908,
+    2.0005865074036664
+  ],
+  "point_contact_cold_component_S_flux": 0.02673303351838964,
+  "point_contact_cold_component_temperature_max": 0.1037988753569668,
+  "source_sha256": "e9b3c1f1871a1e2bc60785a51664865e667d8a1d7becc23e2946c8f2df210979"
+}

@@ -9,6 +9,9 @@
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E5b_ident
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E5b_fd
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E5b_pinn --seed 0
+    cd classroom_heat_pinn_data && python -m src.run_experiments --exp X1_forward --seed 0
+    cd classroom_heat_pinn_data && python -m src.run_experiments --exp X1_fd
+    cd classroom_heat_pinn_data && python -m src.run_experiments --exp X2_fd
 
 Fitting (RBF, FD-inverse) receives only known.json and sensor observations.
 Truth is loaded afterwards through evaluate.py and every access is logged.
@@ -1229,9 +1232,119 @@ def dT_rms(model, obs, known):
 DEFAULT_DATA = {"E0": "A_clean", "E2": "A_clean", "E3": "A_noisy", "E5": E5_DATA}
 
 
+# X1-c (LOG-083): forward PINN with the true Bi fixed, internal wall known. Config = E2 C1.
+X1_FORWARD_TARGETS = {"rel_l2_max": 0.01, "energy_relerr_max": 0.01}
+
+
+def run_x1_forward(seed=0, overwrite=False):
+    """X1-c diagnostic: true Bi (oracle input) fixed, no sensors. Not an inverse result."""
+    import torch
+    try:
+        from . import pinn
+    except ImportError:
+        import src.pinn as pinn
+
+    known = common.load_known_x1()
+    run = f"forward_seed{seed}"
+    out_dir = common.RESULTS_DIR / "x1" / run
+    _claim_run_dir(out_dir, overwrite)
+    exp = {**pinn.DEFAULT_EXPERIMENT, **E2_EXPERIMENT, **E2_CONFIGS["C1"], "seed": seed, "lambda_data": 0.0}
+
+    evaluate._log_access("config_x1.json", "X1-c forward diagnostic: true Bi fixed in the PINN (oracle input)")
+    cfg = json.loads((common.X1_DIR / "config_x1.json").read_text())
+    bi_true = common.bi_dict(cfg["Bi_true"])
+    torch.manual_seed(seed)
+    model = pinn.HeatPINN(known, hidden=exp["hidden"], depth=exp["depth"], bi_fixed=bi_true)
+    history, status = pinn.train(model, known, exp, obs=None)
+    pinn.save_checkpoint(out_dir / "checkpoint.pt", model, exp, history, status,
+                         extra={"exp_id": "X1", "bi_fixed_from": "config_x1.json Bi_true (oracle input)"})
+
+    # ---- evaluation on the fluid nodes of the saved 201-grid reference (1601 solve)
+    evaluate._log_access("reference_x1.npz", "X1-c evaluation: forward field accuracy")
+    with np.load(common.X1_DIR / "reference_x1.npz") as f:
+        ref = {k: f[k] for k in f.files}
+    theta_hat = pinn.predict_grid(model, ref["x"], ref["y"])
+    dT = common.dt_K(known)
+    fluid, tip = ref["fluid"], ref["wall_tip"]
+    err = theta_hat - ref["theta"]
+
+    def rmse(mask):
+        return float(dT * np.sqrt(np.mean(err[mask] ** 2)))
+
+    field = {
+        "rel_l2": float(np.linalg.norm(err[fluid]) / np.linalg.norm(ref["theta"][fluid])),
+        "rmse_C": rmse(fluid), "maxabs_C": float(dT * np.abs(err[fluid]).max()),
+        "rmse_wall_tip_C": rmse(fluid & tip), "rmse_outside_wall_tip_C": rmse(fluid & ~tip),
+        "reference_801_vs_1601_maxabs_C": float(dT * np.abs(ref["theta_801"] - ref["theta"])[fluid].max()),
+        "n_eval_points": int(fluid.sum()),
+    }
+    dense = pinn.sample_walls(400, known, torch.Generator().manual_seed(12345))["X"]
+    neumann = pinn.bc_residuals(model, {"X": dense})["X"].detach().numpy()
+    flows = pinn.heat_flows(model, known)
+    share_true = cfg["wall_flow_share_of_heater_true"]
+    share_err = {w: 100 * (flows["share_signed"][w] - share_true[w]) for w in common.ROBIN_WALLS}
+    targets_met = {"rel_l2": field["rel_l2"] <= X1_FORWARD_TARGETS["rel_l2_max"],
+                   "energy": flows["energy_balance_relerr"] <= X1_FORWARD_TARGETS["energy_relerr_max"]}
+    write_metrics([evaluate.metrics_row(
+        exp_id="X1", method="PINN_forward_C1", data_file="none", seed=seed, status=status["status"],
+        n_unknown=0, **{f"flux_{w}": flows["flux"][w] for w in common.ROBIN_WALLS},
+        source_integral=flows["source_integral"], **{f"share_{w}_err_pp": share_err[w] for w in common.ROBIN_WALLS},
+        q1_rmse_C=field["rmse_C"], q1_maxabs_C=field["maxabs_C"],
+        energy_balance_relerr=flows["energy_balance_relerr"], wall_time_s=status.get("wall_time_s"),
+        notes=f"diagnostic: true Bi fixed (oracle), no sensors; q1_* over fluid nodes of the 201 grid "
+              f"(1601 reference); rel_L2={field['rel_l2']:.4g}; wall-tip RMSE {field['rmse_wall_tip_C']:.4g} C")])
+
+    summary = {
+        "exp_id": "X1", "run": run, "status": status["status"], "environment": environment(),
+        "torch": torch.__version__, "preregistration": "LOG-083",
+        "note": "Diagnostic forward solve with the TRUE Bi fixed (truth used as input), internal wall known. "
+                "Not an inverse result; its weights are not reused by X1-d.",
+        "experiment": exp, "train_status": status, "targets": X1_FORWARD_TARGETS, "targets_met": targets_met,
+        "field": field, "wall_neumann_residual_rms": float(np.sqrt(np.mean(neumann ** 2))),
+        "wall_flux_over_source": flows["flux_grad"]["X"] / flows["source_integral"],
+        "heat_flows": flows, "share_err_pp": share_err,
+        "truth": {"Bi": bi_true, "wall_flow_share_of_heater": share_true, "heater_power_fluid": cfg["heater_power_fluid"]},
+        "n_parameters": pinn.count_parameters(model),
+    }
+    _write_summary(out_dir, summary)
+    (out_dir / "history.json").write_text(json.dumps(common.to_jsonable(history), indent=1))
+    plot_x1_forward(ref, theta_hat, known, common.RESULTS_DIR / "figures" / f"x1_{run}.png", f"X1-c {run}")
+    return summary
+
+
+def plot_x1_forward(ref, theta_hat, known, fig_path, title):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
+
+    fig_path.parent.mkdir(parents=True, exist_ok=True)
+    dT = common.dt_K(known)
+    extent = [0, known["domain"]["LX"], 0, known["domain"]["LY"]]
+    fluid = ref["fluid"]
+    T_ref = np.where(fluid, dT * ref["theta"], np.nan)
+    T_hat = np.where(fluid, dT * theta_hat, np.nan)
+    vmin, vmax = np.nanpercentile(T_ref, [0.5, 99.5])
+    E = T_hat - T_ref
+    elim = np.nanmax(np.abs(E))
+    fig, axes = plt.subplots(1, 3, figsize=(15, 3.9), constrained_layout=True)
+    panels = (("Reference (1601 FD, synthetic)", T_ref, "inferno", vmin, vmax),
+              ("PINN, true Bi fixed", T_hat, "inferno", vmin, vmax),
+              ("PINN - reference", E, "RdBu_r", -elim, elim))
+    for ax, (t, T, cmap, lo, hi) in zip(axes, panels):
+        im = ax.imshow(T.T, origin="lower", extent=extent, vmin=lo, vmax=hi, cmap=cmap)
+        for s in common.solids(known):
+            ax.add_patch(Rectangle((s["x0"], s["y0"]), s["x1"] - s["x0"], s["y1"] - s["y0"], color="0.6"))
+        ax.set_title(t)
+        fig.colorbar(im, ax=ax, label="°C")
+    fig.suptitle(f"{title} — simplified 2D model with an internal adiabatic wall, synthetic")
+    fig.savefig(fig_path, dpi=120)
+    plt.close(fig)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--exp", required=True, choices=["E0", "E1", "E2", "E3", "E5", "E5b_ident", "E5b_fd", "E5b_pinn"])
+    p.add_argument("--exp", required=True, choices=["E0", "E1", "E2", "E3", "E5", "E5b_ident", "E5b_fd", "E5b_pinn", "X1_forward", "X1_fd", "X2_fd"])
     p.add_argument("--data", default=None,
                    help="sensor data name; default per experiment: " +
                         ", ".join(f"{k}={v}" for k, v in DEFAULT_DATA.items()))
@@ -1260,6 +1373,25 @@ def main(argv=None):
 
 
 def _dispatch(args):
+    if args.exp in ("X1_fd", "X2_fd"):
+        try:
+            from . import extensions_fd
+        except ImportError:
+            import src.extensions_fd as extensions_fd
+        run = extensions_fd.run_x1_fd if args.exp == "X1_fd" else extensions_fd.run_x2_fd
+        s = run(write_metrics, _claim_run_dir, environment, args.overwrite)
+        print(json.dumps(common.to_jsonable({"status": s["status"], **({"targets_met": s["targets_met"]}
+              if "targets_met" in s else {}), "results": [
+            {k: r.get(k) for k in ("condition", "data", "variant", "nx", "status", "Bi_relerr", "f", "f_relerr",
+                                   "sensor_rms_C")} | {"q1_rmse_C": (r.get("q1") or {}).get("q1_rmse_C")}
+            for r in s["results"]]}), indent=1))
+        sys.exit(0 if s["status"] == "completed" else 2)
+    if args.exp == "X1_forward":
+        s = run_x1_forward(args.seed, args.overwrite)
+        print(json.dumps(common.to_jsonable({k: s[k] for k in (
+            "status", "targets_met", "field", "wall_neumann_residual_rms", "wall_flux_over_source", "share_err_pp")}
+            | {"energy_balance_relerr": s["heat_flows"]["energy_balance_relerr"]}), indent=1))
+        sys.exit(0 if s["status"] == "completed" else 2)
     if args.exp == "E5b_pinn":
         s = run_e5b_pinn(args.seed, args.overwrite)
         print(json.dumps(common.to_jsonable({"status": s["status"], "truth": s["truth"], "results": {

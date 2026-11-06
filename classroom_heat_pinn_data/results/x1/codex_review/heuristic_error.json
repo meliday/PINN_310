@@ -1,0 +1,6 @@
+{
+  "method": "heuristic norm-difference Richardson estimate; changing max locations, not a certified GCI or error bound",
+  "order": 0.732417019919116,
+  "estimated_801_max_error_C": 0.05810438698353808,
+  "estimated_1601_max_error_C": 0.03497272164765545
+}

@@ -1,0 +1,25 @@
+{
+  "energy_balance_rel_err_1601": 3.439630696679196e-11,
+  "energy_balance_rel_err_101": 2.7479196597242975e-13,
+  "sink_fraction_realised_1601": 0.10000000000000014,
+  "sink_fraction_realised_101": 0.09999999999999995,
+  "walls_plus_sink_over_heater": 1.0000000000309566,
+  "sensors_fluid_and_finite": true,
+  "csv_T_vs_DT_theta_maxdiff_C": 4.0000000002038405e-05,
+  "csv_clean_vs_truth_maxdiff_C": 9.991323699498622e-06,
+  "sensor_801_vs_1601_maxdiff_C": 0.0018210235395343943,
+  "field_801_vs_1601_on_201_nodes_C": {
+    "max": 0.009891831527846229,
+    "rms": 0.0012241177588615947,
+    "max_outside_wall_tip": 0.0023977239403327744
+  },
+  "min_theta": 0.3649322204679688,
+  "max_theta": 1.9342121384444821,
+  "passed": {
+    "energy_lt_1e-8": true,
+    "sink_fraction_exact": true,
+    "sensors_fluid_and_finite": true,
+    "csv_units_within_1e-4C": true,
+    "sensor_801_vs_1601_le_0.005C": true
+  }
+}

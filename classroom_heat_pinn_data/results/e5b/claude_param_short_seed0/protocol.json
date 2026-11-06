@@ -1,0 +1,26 @@
+{
+  "mode": "short",
+  "data": "A_sink_clean",
+  "seed": 0,
+  "development": true,
+  "preregistration": "LOG-071",
+  "variants": [
+    "linear_f",
+    "data400_sink_sampling",
+    "linear_f_data400_sink_sampling"
+  ],
+  "promotion": "f>0, completed, FD re-solve sensor RMS < 0.5 x baseline Adam5000; minimum promoted",
+  "gate": {
+    "relerr": 0.05,
+    "q1_rmse_C": 0.02,
+    "nn_fd_field_rms_C": 0.02,
+    "energy_balance_relerr": 0.01
+  },
+  "source_hashes": {
+    "classroom_heat_pinn_data/diagnostics/pinn_sink_param.py": "3dda32712779be77711440a97778fef74a21892364b39689e0d33ae93bf1fcbc",
+    "classroom_heat_pinn_data/diagnostics/pinn_sink_diagnosis.py": "c35a63a1b1f22da6eac530c4c25b3fe5eaa831a9fb614cf704c1d815c24e95b9",
+    "classroom_heat_pinn_data/src/pinn.py": "ddbe8057527423d146cfb5d3f69fdeb9aab5f4407a94e72e9c37990a681e2f54",
+    "classroom_heat_pinn_data/src/fd.py": "e4c7fcd1095dcfeab2abfa2218ca3c203a1fd4c308e20832fa42ecf6ac61e71d",
+    "classroom_heat_pinn_data/src/run_experiments.py": "407cb604c2777be2d305c69d326bdc9033c278a90a2593845cba568b69cbae6b"
+  }
+}

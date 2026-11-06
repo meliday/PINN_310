@@ -1,0 +1,102 @@
+{
+  "variant": "linear_f_data400_sink_sampling",
+  "data": "A_sink_clean",
+  "development": true,
+  "experiment": {
+    "seed": 0,
+    "hidden": 64,
+    "depth": 4,
+    "n_interior": 1000,
+    "n_wall": 100,
+    "heater_frac": 0.3,
+    "lr_net": 0.001,
+    "lr_beta": 0.003,
+    "adam_steps": 5000,
+    "resample_every": 500,
+    "lbfgs_iters": 0,
+    "lambda_pde": 1.0,
+    "lambda_bc": 1.0,
+    "lambda_data": 400.0,
+    "log_every": 100,
+    "time_budget_s": null,
+    "threads": null
+  },
+  "status": {
+    "status": "completed",
+    "stage": "adam",
+    "reason": null,
+    "adam_steps_done": 5000,
+    "wall_time_s": 85.22960712501663,
+    "device": "cpu",
+    "threads": 8,
+    "dtype": "torch.float64"
+  },
+  "wall_time_s": 85.24853479201556,
+  "consistency": {
+    "Bi": {
+      "S": 1.2310951642677876,
+      "E": 0.4066682059308098,
+      "N": 0.23304890811496784
+    },
+    "f": 0.001285277495929516,
+    "fd_sensor_rms_C": 0.43345741566153273,
+    "nn_sensor_rms_C": 0.049921208762306664,
+    "nn_fd_field_rms_C": 0.5555726821259386
+  },
+  "coverage_mean_1sigma": 143.0,
+  "forbidden_fitting_reads": [],
+  "evaluation": {
+    "q1_rmse_C": 0.12409227558134574,
+    "q1_maxabs_C": 0.6893295129467258,
+    "f_hat": 0.001285277495929516,
+    "f_true": 0.1,
+    "f_relerr": -0.9871472250407048,
+    "Bi": {
+      "S": 1.2310951642677876,
+      "E": 0.4066682059308098,
+      "N": 0.23304890811496784
+    },
+    "Bi_relerr": {
+      "S": 0.23109516426778764,
+      "E": 0.01667051482702453,
+      "N": -0.06780436754012864
+    },
+    "heat_flows": {
+      "flux": {
+        "S": 0.757208925604016,
+        "N": 0.07952364322532657,
+        "E": 0.2089049930806428
+      },
+      "flux_grad": {
+        "S": 0.7460512579551665,
+        "N": 0.0754048956457593,
+        "W": -0.012503797620847733,
+        "E": 0.20498925499139742
+      },
+      "source_integral": 1.0099140279053553,
+      "share_signed": {
+        "S": 0.7497756290944185,
+        "N": 0.07874298309358584,
+        "E": 0.2068542344281809
+      },
+      "share_outflow": {
+        "S": 0.7241600275155389,
+        "N": 0.07605277977970384,
+        "E": 0.19978719270475728
+      },
+      "inflow": {
+        "S": 0.0,
+        "N": 0.0,
+        "E": 0.0
+      },
+      "energy_balance_relerr": 0.03665812411211477,
+      "gradient_balance_relerr": 0.005273322967952063,
+      "ranking": [
+        "S",
+        "E",
+        "N"
+      ],
+      "share_sink": 0.001285277495929516
+    }
+  }
+}

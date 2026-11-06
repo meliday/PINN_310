@@ -1,0 +1,59 @@
+{
+  "_note": "X1 ground truth. Generation / evaluation only; estimation code must not read this file.",
+  "Bi_true": {
+    "S": 1.0,
+    "E": 0.4,
+    "N": 0.25
+  },
+  "theta_inf": {
+    "S": 0.0,
+    "E": 0.0,
+    "N": 0.7
+  },
+  "heater": {
+    "x": 0.2,
+    "y": 0.6,
+    "A": 8.65,
+    "s": 0.15
+  },
+  "solids": [
+    {
+      "x0": 0.0,
+      "x1": 0.6,
+      "y0": 0.3,
+      "y1": 0.34
+    }
+  ],
+  "heater_power_fluid": 0.9891549710537592,
+  "heater_power_no_wall": 1.009924588651525,
+  "heater_removed_by_wall_fraction": 0.0205655133374838,
+  "wall_flow_share_of_heater_true": {
+    "S": 0.524133137291292,
+    "E": 0.27428692113487907,
+    "N": 0.2015799416066332
+  },
+  "noise_C": 0.1,
+  "seed_noise": 2028,
+  "grids": {
+    "truth": 1601,
+    "reference_saved": 201,
+    "uncertainty_check": 801,
+    "inverse_fd_default": 101
+  },
+  "wall_tip_mask": {
+    "tips": [
+      [
+        0.6,
+        0.3
+      ],
+      [
+        0.6,
+        0.34
+      ]
+    ],
+    "radius": 0.1
+  },
+  "T_out_C": 0.0,
+  "DT_K": 20.0,
+  "preregistration": "LOG-078"
+}

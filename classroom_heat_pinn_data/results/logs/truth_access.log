@@ -24,3 +24,23 @@
 2026-11-07T03:10:21+09:00	reference_e5b.npz	E5b 2d evaluation: Q1 metrics
 2026-11-07T03:27:08+09:00	config_e5b.json	E5b 2e evaluation: true Bi, sink fraction, wall shares
 2026-11-07T03:27:08+09:00	reference_e5b.npz	E5b 2e evaluation: Q1 metrics
+2026-11-07T05:47:22+09:00	config_x1.json	X1-c forward diagnostic: true Bi fixed in the PINN (oracle input)
+2026-11-07T05:53:05+09:00	reference_x1.npz	X1-c evaluation: forward field accuracy
+2026-11-07T06:06:27+09:00	config_x1.json	X1-d evaluation: true Bi, sink fraction, wall shares
+2026-11-07T06:06:27+09:00	reference_x1.npz	X1-d evaluation: Q1 reference
+2026-11-07T06:06:41+09:00	config.json	X2 evaluation (base): true Bi and heat flows
+2026-11-07T06:06:41+09:00	reference.npz	X2 evaluation (base): Q1 reference
+2026-11-07T06:06:41+09:00	config.json	X2 figure (base): true Bi and heat flows
+2026-11-07T06:06:41+09:00	reference.npz	X2 figure (base): Q1 reference
+2026-11-07T06:06:53+09:00	config_e5b.json	X2 evaluation (sink): true Bi, sink fraction, wall shares
+2026-11-07T06:06:53+09:00	reference_e5b.npz	X2 evaluation (sink): Q1 reference
+2026-11-07T06:06:53+09:00	config_e5b.json	X2 figure (sink): true Bi, sink fraction, wall shares
+2026-11-07T06:06:53+09:00	reference_e5b.npz	X2 figure (sink): Q1 reference
+2026-11-07T06:07:02+09:00	config_x1.json	X2 evaluation (wall): true Bi, sink fraction, wall shares
+2026-11-07T06:07:02+09:00	reference_x1.npz	X2 evaluation (wall): Q1 reference
+2026-11-07T06:07:02+09:00	config_x1.json	X2 figure (wall): true Bi, sink fraction, wall shares
+2026-11-07T06:07:02+09:00	reference_x1.npz	X2 figure (wall): Q1 reference
+2026-11-07T06:07:25+09:00	config_x2.json	X2 evaluation (wall_sink): true Bi, sink fraction, wall shares
+2026-11-07T06:07:25+09:00	reference_x2.npz	X2 evaluation (wall_sink): Q1 reference
+2026-11-07T06:07:25+09:00	config_x2.json	X2 figure (wall_sink): true Bi, sink fraction, wall shares
+2026-11-07T06:07:25+09:00	reference_x2.npz	X2 figure (wall_sink): Q1 reference

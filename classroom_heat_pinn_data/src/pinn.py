@@ -87,6 +87,7 @@ class HeatPINN(nn.Module):
             else:
                 self.register_buffer("gamma", torch.tensor(np.log(float(sink)), dtype=DTYPE))
         self.learn_sink = sink == "learn"
+        self.solids = common.solids(known)  # X1 internal adiabatic walls; [] for the open room
 
     def bi(self):
         return torch.exp(self.beta)
@@ -146,12 +147,33 @@ def pde_residual(model, xy, known):
     return -lap - model.source(xy, known)
 
 
+def solid_face_normals(xy, solids, tol=1e-9):
+    """Unit normal pointing from the fluid into the solid, for points on solid faces (X1)."""
+    n = torch.zeros_like(xy)
+    for s in solids:
+        on_x = (xy[:, 0] >= s["x0"] - tol) & (xy[:, 0] <= s["x1"] + tol)
+        on_y = (xy[:, 1] >= s["y0"] - tol) & (xy[:, 1] <= s["y1"] + tol)
+        n[on_x & ((xy[:, 1] - s["y0"]).abs() < tol), 1] = 1.0   # bottom face: solid above
+        n[on_x & ((xy[:, 1] - s["y1"]).abs() < tol), 1] = -1.0  # top face: solid below
+        n[on_y & ((xy[:, 0] - s["x0"]).abs() < tol), 0] = 1.0   # left face: solid to the right
+        n[on_y & ((xy[:, 0] - s["x1"]).abs() < tol), 0] = -1.0  # right face: solid to the left
+    if not bool((n.abs().sum(1) == 1).all()):
+        raise ValueError("internal wall points must lie on exactly one solid face (corners excluded)")
+    return n
+
+
 def bc_residuals(model, wall_pts):
-    """{wall: residual} with r = grad.n + Bi (theta - theta_inf); W is grad.n."""
+    """{wall: residual} with r = grad.n + Bi (theta - theta_inf); W is grad.n.
+
+    "X" (X1) holds points on internal solid faces: adiabatic, r = grad.n.
+    """
     bi = model.bi()
     out = {}
     for w, xy in wall_pts.items():
         theta, grad, _ = derivatives(model, xy, second=False)
+        if w == "X":
+            out[w] = (grad * solid_face_normals(xy, model.solids)).sum(1)
+            continue
         n = torch.tensor(NORMALS[w], dtype=DTYPE)
         r = grad @ n
         if w != "W":
@@ -169,7 +191,7 @@ def sample_interior(n, known, gen, heater_frac=0.3):
     n_h = int(round(heater_frac * n))
     uni = torch.rand(n - n_h, 2, generator=gen, dtype=DTYPE) * torch.tensor([LX, LY], dtype=DTYPE)
     if n_h == 0:
-        return uni
+        return _outside_solids(uni, known, gen)
     h = known["heater"]
     pts = []
     while sum(len(p) for p in pts) < n_h:  # Gaussian around the heater, rejected outside
@@ -177,7 +199,23 @@ def sample_interior(n, known, gen, heater_frac=0.3):
         keep = (c[:, 0] > 0) & (c[:, 0] < LX) & (c[:, 1] > 0) & (c[:, 1] < LY)
         pts.append(c[keep])
     near = torch.cat(pts)[:n_h]
-    return torch.cat([uni, near])
+    return _outside_solids(torch.cat([uni, near]), known, gen)
+
+
+def _outside_solids(pts, known, gen):
+    """X1: drop points inside solids and top up with uniform fluid points from the same generator.
+
+    Without solids the points are returned untouched and no random numbers are drawn.
+    """
+    if not common.solids(known):
+        return pts
+    LX, LY = known["domain"]["LX"], known["domain"]["LY"]
+    n = len(pts)
+    pts = pts[torch.from_numpy(~common.inside_solid(pts.numpy(), known))]
+    while len(pts) < n:
+        c = torch.rand(n - len(pts), 2, generator=gen, dtype=DTYPE) * torch.tensor([LX, LY], dtype=DTYPE)
+        pts = torch.cat([pts, c[torch.from_numpy(~common.inside_solid(c.numpy(), known))]])
+    return pts
 
 
 def sample_walls(n, known, gen):
@@ -186,10 +224,38 @@ def sample_walls(n, known, gen):
     eps = 1e-6
     s = lambda L: eps + (L - 2 * eps) * torch.rand(n, generator=gen, dtype=DTYPE)
     zeros, ones = torch.zeros(n, dtype=DTYPE), torch.ones(n, dtype=DTYPE)
-    return {
+    walls = {
         "S": torch.stack([s(LX), zeros], 1), "N": torch.stack([s(LX), LY * ones], 1),
         "W": torch.stack([zeros, s(LY)], 1), "E": torch.stack([LX * ones, s(LY)], 1),
     }
+    faces = solid_faces(known)
+    if faces:  # X1: about n points on the fluid-facing solid faces, by length, at least 10 per face
+        total = sum(f["length"] for f in faces)
+        pts = []
+        for f in faces:
+            m = max(10, int(round(n * f["length"] / total)))
+            t = eps + (f["length"] - 2 * eps) * torch.rand(m, generator=gen, dtype=DTYPE)
+            fixed = torch.full((m,), f["at"], dtype=DTYPE)
+            start = torch.full((m,), f["start"], dtype=DTYPE)
+            pts.append(torch.stack([start + t, fixed], 1) if f["along"] == "x" else torch.stack([fixed, start + t], 1))
+        walls["X"] = torch.cat(pts)
+    return walls
+
+
+def solid_faces(known):
+    """Fluid-facing faces of the solids: [{along, at, start, length}]; faces on the outer wall are skipped."""
+    LX, LY = known["domain"]["LX"], known["domain"]["LY"]
+    faces = []
+    for s in common.solids(known):
+        if s["y0"] > 0:
+            faces.append({"along": "x", "at": s["y0"], "start": s["x0"], "length": s["x1"] - s["x0"]})
+        if s["y1"] < LY:
+            faces.append({"along": "x", "at": s["y1"], "start": s["x0"], "length": s["x1"] - s["x0"]})
+        if s["x0"] > 0:
+            faces.append({"along": "y", "at": s["x0"], "start": s["y0"], "length": s["y1"] - s["y0"]})
+        if s["x1"] < LX:
+            faces.append({"along": "y", "at": s["x1"], "start": s["y0"], "length": s["y1"] - s["y0"]})
+    return faces
 
 
 # ------------------------------------------------------------------ loss
@@ -235,10 +301,26 @@ def heat_flows(model, known, n=401):
         if w != "W":
             i = common.ROBIN_WALLS.index(w)
             flux[w] = _trapz(bi[i] * (theta - tinf[i]), coord)
-    # Source integral by the same trapezoid rule on a fine tensor grid.
+    faces = solid_faces(known)
+    if faces:  # X1: gradient flux into the solids (adiabatic, should be ~0); n points per face
+        flux_grad["X"] = 0.0
+        for f in faces:
+            t = np.linspace(0, f["length"], n)
+            p = (np.c_[f["start"] + t, f["at"] + 0 * t] if f["along"] == "x"
+                 else np.c_[f["at"] + 0 * t, f["start"] + t])
+            # nudge the end points off the corners so each point has one face normal
+            p[0] += 1e-9 * (p[1] - p[0]) / np.linalg.norm(p[1] - p[0])
+            p[-1] += 1e-9 * (p[-2] - p[-1]) / np.linalg.norm(p[-2] - p[-1])
+            xy = torch.tensor(p, dtype=DTYPE)
+            _, grad, _ = derivatives(model, xy, second=False)
+            nrm = solid_face_normals(xy, common.solids(known), tol=1e-12).numpy()
+            flux_grad["X"] += _trapz(-(grad.detach().numpy() * nrm).sum(1), t)
+    # Source integral by the same trapezoid rule on a fine tensor grid (solid interiors excluded).
     gx, gy = np.linspace(0, LX, 401), np.linspace(0, LY, 321)
     X, Y = np.meshgrid(gx, gy, indexing="ij")
     Q = source(torch.tensor(np.c_[X.ravel(), Y.ravel()], dtype=DTYPE), known).numpy().reshape(X.shape)
+    if faces:
+        Q = Q * ~common.inside_solid(np.c_[X.ravel(), Y.ravel()], known).reshape(X.shape)
     H = _trapz(np.array([_trapz(Q[i], gy) for i in range(len(gx))]), gx)
     out = {w: max(flux[w], 0.0) for w in flux}
     out_sum = sum(out.values())
