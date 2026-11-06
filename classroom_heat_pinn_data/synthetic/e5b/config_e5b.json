@@ -1,0 +1,44 @@
+{
+  "_note": "E5b ground truth. Generation / evaluation only; estimation code must not read this file.",
+  "Bi_true": {
+    "S": 1.0,
+    "E": 0.4,
+    "N": 0.25
+  },
+  "theta_inf": {
+    "S": 0.0,
+    "E": 0.0,
+    "N": 0.7
+  },
+  "heater": {
+    "x": 0.2,
+    "y": 0.6,
+    "A": 8.65,
+    "s": 0.15
+  },
+  "sink": {
+    "x": 0.75,
+    "y": 0.03,
+    "s": 0.05,
+    "fraction_of_heater": 0.1,
+    "amplitude_201": 8.860632021781969
+  },
+  "heater_power": 1.0098802331465007,
+  "wall_flow_share_of_heater_true": {
+    "S": 0.6130793026552595,
+    "E": 0.2035460458109048,
+    "N": 0.0833746515335979
+  },
+  "sink_share_of_heater_true": 0.1,
+  "noise_C": 0.1,
+  "seed_noise": 2027,
+  "grids": {
+    "reference": [
+      201,
+      161
+    ],
+    "inverse_fd": 101
+  },
+  "T_out_C": 0.0,
+  "DT_K": 20.0
+}

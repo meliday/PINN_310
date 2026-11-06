@@ -25,6 +25,12 @@ TRUTH_FILES = {
     "config.json", "reference.npz", "whatif_reference.npz", "mismatch_reference.npz",
 }
 
+# E5b (user-requested extension, plan section 17.2): simple model + one known-position sink.
+E5B_DIR = PKG_DIR / "synthetic" / "e5b"
+E5B_TRAINING_FILES = {"known_e5b.json", "sensors_A_sink_clean.csv", "sensors_A_sink_noisy.csv"}
+E5B_TRUTH_FILES = {"config_e5b.json", "reference_e5b.npz"}
+SINK_GEOMETRY_KEYS = ("x", "y", "s")
+
 ROBIN_WALLS = ("S", "E", "N")
 SENSOR_COLUMNS = ["sensor_id", "x", "y", "theta_obs", "T_obs_C"]
 CSV_T_ATOL_C = 1e-4
@@ -46,15 +52,42 @@ def load_known(data_dir=DATA_DIR):
     return known
 
 
+def load_known_e5b(data_dir=E5B_DIR):
+    """known.json for E5b: the base known config plus the sink's position and width.
+
+    Refuses a file that carries a numeric sink strength, since that is the unknown.
+    """
+    known = json.loads((Path(data_dir) / "known_e5b.json").read_text())
+    if any(key.lower().startswith("bi") for key in known):
+        raise ValueError("known_e5b.json unexpectedly contains Bi values")
+    sink = known.get("sink")
+    if not isinstance(sink, dict) or any(k not in sink for k in SINK_GEOMETRY_KEYS):
+        raise ValueError("known_e5b.json must give the sink position and width (x, y, s)")
+    if isinstance(sink.get("strength"), (int, float)):
+        raise ValueError("known_e5b.json must not contain the sink strength (it is the unknown)")
+    return known
+
+
+def sink_geometry(known):
+    """(x, y, s) of the known-position sink, or None for the base model."""
+    sink = known.get("sink")
+    return None if sink is None else {k: float(sink[k]) for k in SINK_GEOMETRY_KEYS}
+
+
 def dt_K(known):
     return float(known["temperature_scaling"]["DT_K"])
 
 
-def load_observations(name, known, data_dir=DATA_DIR):
-    """Load sensors_<name>.csv, e.g. name='A_clean'. Checks columns and units."""
+def load_observations(name, known, data_dir=None):
+    """Load sensors_<name>.csv, e.g. name='A_clean' or 'A_sink_noisy'. Checks columns and units.
+
+    data_dir defaults to the directory that holds that data set (base data or E5b).
+    """
     fname = f"sensors_{name}.csv"
-    if fname not in TRAINING_FILES:
+    if fname not in TRAINING_FILES | E5B_TRAINING_FILES:
         raise ValueError(f"{fname} is not an allowed training file")
+    if data_dir is None:
+        data_dir = E5B_DIR if fname in E5B_TRAINING_FILES else DATA_DIR
     df = pd.read_csv(Path(data_dir) / fname)
     if list(df.columns) != SENSOR_COLUMNS:
         raise ValueError(f"{fname}: columns {list(df.columns)} != {SENSOR_COLUMNS}")

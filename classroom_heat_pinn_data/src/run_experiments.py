@@ -6,6 +6,7 @@
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E2 --data A_clean --seed 0 --config C1
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E3 --data A_noisy --seed 0
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E5 --seed 0
+    cd classroom_heat_pinn_data && python -m src.run_experiments --exp E5b_ident
 
 Fitting (RBF, FD-inverse) receives only known.json and sensor observations.
 Truth is loaded afterwards through evaluate.py and every access is logged.
@@ -21,10 +22,10 @@ import time
 import numpy as np
 
 try:
-    from ..synthetic import solver
+    from ..synthetic import ident, solver
     from . import baselines, common, evaluate, fd
 except ImportError:
-    from synthetic import solver
+    from synthetic import ident, solver
     import src.baselines as baselines
     import src.common as common
     import src.evaluate as evaluate
@@ -160,6 +161,18 @@ def _write_summary(out_dir, summary):
     (out_dir / "summary.json").write_text(json.dumps(common.to_jsonable(summary), indent=2))
 
 
+# Data sets whose truth is the base model files (config.json / *reference.npz). E5b sink
+# data have their own truth and must not be scored by E0/E2/E3.
+BASE_DATA = {"A_clean", "A_noisy", "B_clean", "B_noisy", "A_mismatch"}
+BASE_DATA_EXPS = ("E0", "E2", "E3")
+
+
+def _validate_base_data(data_name, exp_id):
+    if data_name not in BASE_DATA:
+        raise ValueError(f"{exp_id} uses the base-model truth; {data_name!r} is not one of "
+                         f"{sorted(BASE_DATA)}. E5b sink data are evaluated only by E5b runs.")
+
+
 class RunExistsError(RuntimeError):
     """A run directory already holds results and overwrite was not requested."""
 
@@ -177,6 +190,7 @@ def _claim_run_dir(out_dir, overwrite=False):
 
 
 def run_e0(data_name="A_clean", overwrite=False):
+    _validate_base_data(data_name, "E0")
     known = common.load_known()
     obs = common.load_observations(data_name, known)
     data_file = f"sensors_{data_name}.csv"
@@ -423,6 +437,7 @@ def run_e2(data_name="A_clean", seed=0, config="base", overwrite=False):
     config 'base' keeps the original run name and metrics method; others get a tag.
     An existing run with the same name is refused unless overwrite=True.
     """
+    _validate_base_data(data_name, "E2")
     import torch
     try:
         from . import pinn
@@ -604,6 +619,7 @@ def run_e3(data_name="A_noisy", seed=0, overwrite=False):
     except ImportError:
         import src.pinn as pinn
 
+    _validate_base_data(data_name, "E3")
     sigma_C = noise_sigma_C(data_name)  # before any output: unsupported data fail early
     known = common.load_known()
     obs = common.load_observations(data_name, known)
@@ -873,6 +889,120 @@ def run_e5(data_name=E5_DATA, seed=0, overwrite=False):
     return summary
 
 
+# ---------------------------------------------------------------- E5b (user-requested extension)
+E5B_PARAMS = ("log Bi_S", "log Bi_E", "log Bi_N", "log f")
+
+
+def _local_identifiability(J, sigmas_C, dT, names):
+    """Rank, singular values and, if identifiable, sigma^2 (J^T J)^-1 diagnostics for one Jacobian.
+
+    Uses the SVD-based synthetic/ident.covariance_from_jacobian, so an ill-conditioned but
+    full-rank J still gets a (large) covariance and a rank-deficient J gets none.
+    """
+    cov, diag = ident.covariance_from_jacobian(J, sigma=1.0)
+    out = {"params": list(names), "rank": diag["rank"], "n_parameters": diag["n_parameters"],
+           "singular_values": diag["singular_values"],
+           "condition_number": diag["condition_number"] if np.isfinite(diag["condition_number"]) else None,
+           "identifiable": cov is not None}
+    if cov is not None:
+        d = np.sqrt(np.diag(cov))
+        out["correlation"] = cov / np.outer(d, d)
+        # Parameters are logs, so the std of p is the relative std of Bi or f.
+        out["rel_std"] = {f"{s:g}C": dict(zip(names, (s / dT) * d)) for s in sigmas_C}
+    return out
+
+
+def run_e5b_ident(overwrite=False, sigmas_C=(0.1, 0.3), h=1e-4):
+    """E5b local identifiability at the true parameters (tool diagnostic, truth access logged).
+
+    Compares: base model (no sink, 3 Bi), sink with known f (3 Bi), sink with unknown f (3 Bi + f).
+    """
+    known = common.load_known_e5b()
+    obs = common.load_observations("A_sink_clean", known)
+    out_dir = common.RESULTS_DIR / "e5b" / "ident"
+    _claim_run_dir(out_dir, overwrite)
+    evaluate._log_access("config_e5b.json", "E5b identifiability: Jacobian evaluated at the true parameters")
+    cfg = json.loads((common.E5B_DIR / "config_e5b.json").read_text())
+    bi_true = common.bi_dict(cfg["Bi_true"])
+    f_true = float(cfg["sink"]["fraction_of_heater"])
+    dT = common.dt_K(known)
+    p0 = np.log([bi_true[w] for w in common.ROBIN_WALLS] + [f_true])
+
+    def sensors(p, with_sink=True):
+        x, y, th, _ = fd.solve_field(np.exp(p[:3]), known, nx=fd.INVERSE_NX,
+                                     sink_fraction=float(np.exp(p[3])) if with_sink else None)
+        return fd.sample(x, y, th, obs.xy)
+
+    def jac(p, with_sink, n_params):
+        J = np.zeros((len(obs.theta), n_params))
+        for k in range(n_params):
+            e = np.zeros_like(p); e[k] = h
+            J[:, k] = (sensors(p + e, with_sink) - sensors(p - e, with_sink)) / (2 * h)
+        return J
+
+    J4 = jac(p0, True, 4)
+    J_base = jac(p0, False, 3)
+    cases = {
+        "base_model_no_sink": _local_identifiability(J_base, sigmas_C, dT, E5B_PARAMS[:3]),
+        "sink_f_known": _local_identifiability(J4[:, :3], sigmas_C, dT, E5B_PARAMS[:3]),
+        "sink_f_unknown": _local_identifiability(J4, sigmas_C, dT, E5B_PARAMS),
+    }
+    f_sensitivity_C = dT * np.abs(J4[:, 3])  # degC per unit change of log f
+    summary = {
+        "exp_id": "E5b_ident", "data_layout": "A", "grid": fd.INVERSE_NX, "step_h": h,
+        "evaluated_at": {"Bi": bi_true, "f": f_true},
+        "note": ("Local linearised identifiability (tool diagnostic using the true parameters). "
+                 "Not a global uniqueness result. User-requested extension, plan section 17.2."),
+        "cases": cases,
+        "f_sensitivity_per_sensor_C": {
+            f"{int(i)} ({x:.2f},{y:.2f})": v for i, (x, y), v in zip(obs.sensor_id, obs.xy, f_sensitivity_C)},
+        "base_vs_data_guide_0.1C": {"expected_percent": {"S": 1.6, "E": 3.8, "N": 7.9}},
+    }
+    _write_summary(out_dir, summary)
+    _plot_e5b_ident(cases, sigmas_C[0], f_sensitivity_C, obs, common.RESULTS_DIR / "figures" / "e5b_ident.png")
+    return summary
+
+
+def _plot_e5b_ident(cases, sigma, f_sens, obs, path):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    key = f"{sigma:g}C"
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4), constrained_layout=True)
+    ax = axes[0]
+    labels = list(E5B_PARAMS)
+    width = 0.27
+    for i, (name, c) in enumerate(cases.items()):
+        vals = [100 * c["rel_std"][key].get(p, np.nan) if "rel_std" in c else np.nan for p in labels]
+        ax.bar(np.arange(len(labels)) + (i - 1) * width, vals, width=width, label=name)
+    ax.set_xticks(range(len(labels)), labels)
+    ax.set_ylabel(f"local relative std at {sigma:g} °C [%]"); ax.set_title("Relative std (linearised)")
+    ax.legend(fontsize=8)
+    full = cases["sink_f_unknown"]
+    corr = full.get("correlation")
+    if corr is None:
+        axes[1].axis("off")
+        axes[1].text(0.5, 0.5, f"Correlation not computable:\nrank {full['rank']} < {full['n_parameters']}"
+                     " (not locally identifiable)", ha="center", va="center", fontsize=11)
+    else:
+        corr = np.asarray(corr, float)
+        im = axes[1].imshow(corr, vmin=-1, vmax=1, cmap="RdBu_r")
+        axes[1].set_xticks(range(4), labels, rotation=30); axes[1].set_yticks(range(4), labels)
+        for (r, c), v in np.ndenumerate(corr):
+            axes[1].text(c, r, f"{v:.2f}", ha="center", va="center", fontsize=9)
+        fig.colorbar(im, ax=axes[1])
+    axes[1].set_title("Correlation, f unknown")
+    sc = axes[2].scatter(obs.xy[:, 0], obs.xy[:, 1], c=f_sens, s=120, cmap="viridis")
+    axes[2].plot(0.75, 0.03, "rx", ms=10, label="sink")
+    axes[2].set_xlim(0, 1); axes[2].set_ylim(0, 0.8); axes[2].set_aspect("equal")
+    axes[2].set_title("|dT/d log f| per sensor [°C]"); axes[2].legend(fontsize=8)
+    fig.colorbar(sc, ax=axes[2])
+    fig.suptitle("E5b local identifiability — simplified 2D model, synthetic, sink position/width known")
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
 def dT_rms(model, obs, known):
     import torch
     with torch.no_grad():
@@ -886,7 +1016,7 @@ DEFAULT_DATA = {"E0": "A_clean", "E2": "A_clean", "E3": "A_noisy", "E5": E5_DATA
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--exp", required=True, choices=["E0", "E1", "E2", "E3", "E5"])
+    p.add_argument("--exp", required=True, choices=["E0", "E1", "E2", "E3", "E5", "E5b_ident"])
     p.add_argument("--data", default=None,
                    help="sensor data name; default per experiment: " +
                         ", ".join(f"{k}={v}" for k, v in DEFAULT_DATA.items()))
@@ -897,6 +1027,11 @@ def main(argv=None):
     args = p.parse_args(argv)
     if args.data is None:
         args.data = DEFAULT_DATA.get(args.exp)
+    if args.exp in BASE_DATA_EXPS:
+        try:
+            _validate_base_data(args.data, args.exp)
+        except ValueError as exc:
+            p.error(str(exc))
     if args.exp == "E5":
         try:
             _validate_e5_data(args.data)
@@ -910,6 +1045,11 @@ def main(argv=None):
 
 
 def _dispatch(args):
+    if args.exp == "E5b_ident":
+        s = run_e5b_ident(args.overwrite)
+        print(json.dumps(common.to_jsonable({k: s[k] for k in ("evaluated_at", "cases", "f_sensitivity_per_sensor_C")}),
+                         indent=1))
+        return
     if args.exp == "E5":
         s = run_e5(args.data, args.seed, args.overwrite)
         fdi = s["fd_inverse"]
