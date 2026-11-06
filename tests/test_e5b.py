@@ -14,7 +14,7 @@ from contextlib import redirect_stderr
 import io
 from unittest import mock
 
-from classroom_heat_pinn_data.src import common, fd, run_experiments as rx
+from classroom_heat_pinn_data.src import baselines, common, fd, run_experiments as rx
 
 # Records every file opened while armed (same approach as test_e0_baselines).
 _OPENED = []
@@ -132,6 +132,42 @@ class FdSinkTests(unittest.TestCase):
         self.assertLess(20 * np.abs(theta - theta_ref).max(), 1e-9)
 
 
+class FdInverseSinkTests(unittest.TestCase):
+    def test_clean_recovery_of_bi_and_sink_without_truth_access(self):
+        known = common.load_known_e5b()
+        with _Watch() as opened:
+            obs = common.load_observations("A_sink_clean", known)
+            fit = baselines.fit_fd_inverse(obs, known, {"sink": True, "starts": [(1, 1, 1, 0.05)]})
+        self.assertFalse(set(opened) & E5B_TRUTH_REAL, "fitting opened E5b truth")
+        self.assertEqual(fit["status"], "completed")
+        self.assertEqual(fit["jacobian"]["rank"], 4)
+        # Truth read only to score the finished fit.
+        cfg = json.loads((common.E5B_DIR / "config_e5b.json").read_text())
+        for w in common.ROBIN_WALLS:
+            self.assertLess(abs(fit["Bi"][w] / cfg["Bi_true"][w] - 1), 5e-3, w)
+        self.assertLess(abs(fit["sink_fraction"] / cfg["sink"]["fraction_of_heater"] - 1), 5e-3)
+
+    def test_base_fit_unchanged_and_has_no_sink(self):
+        known = common.load_known()
+        obs = common.load_observations("A_clean", known)
+        fit = baselines.fit_fd_inverse(obs, known, {"starts": [(1, 1, 1)]})
+        self.assertIsNone(fit["sink_fraction"])
+        self.assertEqual(len(fit["beta"]), 3)
+        # Same numbers as the stored E0 result for this start (results/e0/A_clean/fd_inverse_runs.json).
+        stored = json.loads((common.RESULTS_DIR / "e0" / "A_clean" / "fd_inverse_runs.json").read_text())
+        ref = next(r for r in stored if r["start"] == [1.0, 1.0, 1.0])
+        for w in common.ROBIN_WALLS:
+            self.assertAlmostEqual(fit["Bi"][w], ref["Bi"][w], places=10)
+
+    def test_sink_bounds_respected(self):
+        known = common.load_known_e5b()
+        obs = common.load_observations("A_sink_clean", known)
+        # A start above the bound is clipped into it; the optimizer never leaves the bounds.
+        fit = baselines.fit_fd_inverse(obs, known, {"sink": True, "starts": [(1, 1, 1, 0.9)], "max_nfev": 3})
+        f = fit["runs"][0]["sink_fraction"]
+        self.assertTrue(baselines.SINK_BOUNDS[0] <= f <= baselines.SINK_BOUNDS[1] + 1e-12, f)
+
+
 class E5bRoutingTests(unittest.TestCase):
     """E5B-DATA-ROUTING-01: sink data must not be scored against the base-model truth."""
 
@@ -166,6 +202,99 @@ class E5bRoutingTests(unittest.TestCase):
     def test_base_data_still_accepted(self):
         for name in sorted(rx.BASE_DATA):
             rx._validate_base_data(name, "E3")  # no error
+
+    def test_mismatch_data_rejected_by_base_runners(self):
+        # BASE-MISMATCH-REFERENCE-01: A_mismatch's truth is mismatch_reference, which E0/E2/E3 never load.
+        self.assertNotIn("A_mismatch", rx.BASE_DATA)
+        runners = {"E0": lambda d: rx.run_e0(d), "E2": lambda d: rx.run_e2(d, 0),
+                   "E3": lambda d: rx.run_e3(d, 0)}
+        with mock.patch.object(common, "load_known", side_effect=AssertionError("unexpected data read")), \
+                mock.patch.object(common, "load_observations", side_effect=AssertionError("unexpected data read")):
+            for exp, run in runners.items():
+                with self.subTest(exp=exp), self.assertRaisesRegex(ValueError, "A_mismatch only by E5"):
+                    run("A_mismatch")
+        for exp in runners:
+            err = io.StringIO()
+            with self.subTest(cli=exp), redirect_stderr(err), \
+                    mock.patch.object(rx, "_dispatch", side_effect=AssertionError("dispatched")), \
+                    self.assertRaises(SystemExit) as stopped:
+                rx.main(["--exp", exp, "--data", "A_mismatch"])
+            self.assertEqual(stopped.exception.code, 2)
+        self.assertEqual(list(self.tmp.iterdir()), [])
+
+
+class E5bFdExitTests(unittest.TestCase):
+    """E5B-FD-EXIT-01: an unconverged FD fit must show in the summary status and the CLI exit code."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        patcher = mock.patch.object(common, "RESULTS_DIR", self.tmp)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @staticmethod
+    def _fake_fit(fail_sink):
+        # Coarse-grid stand-in for fit_fd_inverse so the runner's evaluation path runs quickly.
+        def fit(obs, known, experiment=None):
+            sink = bool((experiment or {}).get("sink"))
+            if sink and fail_sink:
+                return {"status": "failed", "reason": "no start converged", "runs": [], "wall_time_s": 0.0, "nx": 41}
+            return {"status": "completed", "Bi": {"S": 1.0, "E": 0.4, "N": 0.25},
+                    "sink_fraction": 0.1 if sink else None, "nx": 41, "sensor_rms_C": 0.0,
+                    "jacobian": {}, "n_converged": 1, "selected_start": [1.0], "runs": [{}], "wall_time_s": 0.0}
+        return fit
+
+    def _run_cli(self, fail_sink):
+        out = io.StringIO()
+        with mock.patch.object(baselines, "fit_fd_inverse", side_effect=self._fake_fit(fail_sink)), \
+                mock.patch("sys.stdout", out), self.assertRaises(SystemExit) as stopped:
+            rx.main(["--exp", "E5b_fd"])
+        summary = json.loads((self.tmp / "e5b" / "fd_A_sink" / "summary.json").read_text())
+        return stopped.exception.code, summary, json.loads(out.getvalue())
+
+    def test_partial_failure_exits_2_and_is_named(self):
+        code, summary, printed = self._run_cli(fail_sink=True)
+        self.assertEqual(code, 2)
+        self.assertEqual(summary["status"], "failed")
+        self.assertEqual(printed["status"], "failed")
+        self.assertEqual(sorted(summary["failed_fits"]), ["A_sink_clean/sink", "A_sink_noisy/sink"])
+        self.assertEqual(summary["results"]["A_sink_clean"]["nosink"]["status"], "completed")
+
+    def test_all_converged_exits_0(self):
+        code, summary, printed = self._run_cli(fail_sink=False)
+        self.assertEqual(code, 0)
+        self.assertEqual(summary["status"], "completed")
+        self.assertEqual(summary["failed_fits"], [])
+
+    def test_no_successful_fields_preserves_failures_and_skips_only_empty_plots(self):
+        for fail_all in (True, False):
+            with self.subTest(fail_all=fail_all), tempfile.TemporaryDirectory() as tmp:
+                successful = self._fake_fit(False)
+
+                def fit(obs, known, experiment=None):
+                    if fail_all or obs.name == "A_sink_clean":
+                        return {"status": "failed", "reason": "injected nonconvergence",
+                                "runs": [], "wall_time_s": 0.0, "nx": 41}
+                    return successful(obs, known, experiment)
+
+                with mock.patch.object(common, "RESULTS_DIR", Path(tmp)), \
+                        mock.patch.object(baselines, "fit_fd_inverse", side_effect=fit), \
+                        mock.patch.object(rx, "plot_compare") as plot, \
+                        mock.patch("sys.stdout", io.StringIO()), \
+                        self.assertRaises(SystemExit) as stopped:
+                    rx.main(["--exp", "E5b_fd"])
+                self.assertEqual(stopped.exception.code, 2)
+                summary = json.loads((Path(tmp) / "e5b/fd_A_sink/summary.json").read_text())
+                self.assertEqual(summary["status"], "failed")
+                self.assertEqual(len(summary["failed_fits"]), 4 if fail_all else 2)
+                import csv
+                with (Path(tmp) / "metrics.csv").open() as file:
+                    statuses = [row["status"] for row in csv.DictReader(file)]
+                self.assertEqual(statuses.count("failed"), 4 if fail_all else 2)
+                self.assertEqual(plot.call_count, 0 if fail_all else 1)
+                if not fail_all:
+                    self.assertEqual(len(plot.call_args.args[1]), 2)
 
 
 class LocalIdentifiabilityTests(unittest.TestCase):

@@ -1,0 +1,100 @@
+{
+  "variant": "baseline",
+  "data": "A_sink_clean",
+  "development": true,
+  "experiment": {
+    "seed": 0,
+    "hidden": 64,
+    "depth": 4,
+    "n_interior": 1000,
+    "n_wall": 100,
+    "heater_frac": 0.3,
+    "lr_net": 0.001,
+    "lr_beta": 0.003,
+    "adam_steps": 20000,
+    "resample_every": 500,
+    "lbfgs_iters": 100,
+    "lambda_pde": 1.0,
+    "lambda_bc": 1.0,
+    "lambda_data": 1.0,
+    "log_every": 100,
+    "time_budget_s": null,
+    "threads": null
+  },
+  "status": {
+    "status": "completed",
+    "stage": "lbfgs",
+    "reason": null,
+    "adam_steps_done": 20000,
+    "lbfgs": "completed",
+    "wall_time_s": 354.29491883300943,
+    "device": "cpu",
+    "threads": 8,
+    "dtype": "torch.float64"
+  },
+  "wall_time_with_diagnostics_s": 354.9409024589986,
+  "checks": {
+    "sensor_theta_mse": 0.00012248668935516306,
+    "sensor_rms_C": 0.2213474096122772,
+    "uniform_pde_mse": 8.240360398649823e-05,
+    "probe_bc_mse": 5.5580633608802645e-05,
+    "selection_score": 0.04913265997966053
+  },
+  "evaluation": {
+    "q1_rmse_C": 0.1813486130790488,
+    "q1_maxabs_C": 0.6651658296313778,
+    "f_hat": 0.0004637895240916395,
+    "f_true": 0.1,
+    "f_relerr": -0.9953621047590836,
+    "Bi": {
+      "S": 1.1467052813811838,
+      "E": 0.47694872820527945,
+      "N": 0.18685904321247906
+    },
+    "Bi_relerr": {
+      "S": 0.14670528138118377,
+      "E": 0.19237182051319857,
+      "N": -0.25256382715008374
+    },
+    "heat_flows": {
+      "flux": {
+        "S": 0.7041664969681074,
+        "N": 0.06336134286485498,
+        "E": 0.2429231296759421
+      },
+      "flux_grad": {
+        "S": 0.7041374366418879,
+        "N": 0.0631109041064909,
+        "W": -3.897944319333226e-05,
+        "E": 0.24266301124250456
+      },
+      "source_integral": 1.0099140279053553,
+      "share_signed": {
+        "S": 0.6972539023233557,
+        "N": 0.06273934326496247,
+        "E": 0.24053842501800338
+      },
+      "share_outflow": {
+        "S": 0.6968833899089074,
+        "N": 0.06270600432562266,
+        "E": 0.24041060576546988
+      },
+      "inflow": {
+        "S": 0.0,
+        "N": 0.0,
+        "E": 0.0
+      },
+      "energy_balance_relerr": 0.0009954601304134286,
+      "gradient_balance_relerr": 0.000422543084776675,
+      "ranking": [
+        "S",
+        "E",
+        "N"
+      ],
+      "share_sink": 0.0004637895240916395
+    }
+  },
+  "coverage_mean_1sigma": 5.575,
+  "coverage_mean_2sigma": 18.7,
+  "forbidden_fitting_reads": []
+}

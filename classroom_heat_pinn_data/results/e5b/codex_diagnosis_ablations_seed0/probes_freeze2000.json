@@ -1,0 +1,177 @@
+[
+  {
+    "step": 0,
+    "stage": "adam",
+    "f": 0.05000000000000001,
+    "raw_losses": {
+      "data": 0.0582223001338771,
+      "pde": 12.063736282909314,
+      "bc": 0.6814783369936518
+    },
+    "net_gradient_norm": {
+      "data": 0.8182474300386602,
+      "pde": 40.13630645903845,
+      "bc": 6.769294109309771
+    },
+    "weighted_net_gradient_norm": {
+      "data": 0.8182474300386602,
+      "pde": 40.13630645903845,
+      "bc": 6.769294109309771
+    },
+    "data_pde_net_gradient_cosine": 0.37703035650181893,
+    "gamma_pde_gradient": 0.09784450678161305,
+    "gamma_data_direct_gradient": 0.0,
+    "gamma_active": false,
+    "fixed_network_f_opt_unconstrained": 0.012043213139316911,
+    "fixed_network_f_opt_nonnegative": 0.012043213139316911,
+    "pde_at_current_f": 12.063736282909314,
+    "pde_at_zero_f": 12.030336447867661,
+    "field_checks": {
+      "sensor_theta_mse": 0.0582223001338771,
+      "sensor_rms_C": 4.825859514485564,
+      "uniform_pde_mse": 6.3382956747221675,
+      "probe_bc_mse": 0.6814783369936518,
+      "selection_score": 30.30869406526666
+    }
+  },
+  {
+    "step": 100,
+    "stage": "adam",
+    "f": 0.05000000000000001,
+    "raw_losses": {
+      "data": 0.0029713232194115676,
+      "pde": 0.46250661480423466,
+      "bc": 0.01220499668844928
+    },
+    "net_gradient_norm": {
+      "data": 0.2590508961442553,
+      "pde": 3.529139185159512,
+      "bc": 0.27756247313011984
+    },
+    "weighted_net_gradient_norm": {
+      "data": 0.2590508961442553,
+      "pde": 3.529139185159512,
+      "bc": 0.27756247313011984
+    },
+    "data_pde_net_gradient_cosine": -0.4893898447154177,
+    "gamma_pde_gradient": 0.1325425279627146,
+    "gamma_data_direct_gradient": 0.0,
+    "gamma_active": false,
+    "fixed_network_f_opt_unconstrained": -0.0014171786371791634,
+    "fixed_network_f_opt_nonnegative": 0.0,
+    "pde_at_current_f": 0.46250661480423466,
+    "pde_at_zero_f": 0.39440875858147956,
+    "field_checks": {
+      "sensor_theta_mse": 0.0029713232194115676,
+      "sensor_rms_C": 1.090196903208144,
+      "uniform_pde_mse": 0.5131324380545895,
+      "probe_bc_mse": 0.01220499668844928,
+      "selection_score": 1.7138667225076656
+    }
+  },
+  {
+    "step": 1000,
+    "stage": "adam",
+    "f": 0.05000000000000001,
+    "raw_losses": {
+      "data": 0.002163893838082436,
+      "pde": 0.025207190944836352,
+      "bc": 0.003558852174176301
+    },
+    "net_gradient_norm": {
+      "data": 0.2470400498653011,
+      "pde": 1.2366070034597134,
+      "bc": 0.22360811571923858
+    },
+    "weighted_net_gradient_norm": {
+      "data": 0.2470400498653011,
+      "pde": 1.2366070034597134,
+      "bc": 0.22360811571923858
+    },
+    "data_pde_net_gradient_cosine": 0.3424962559612372,
+    "gamma_pde_gradient": 0.0032054118672446242,
+    "gamma_data_direct_gradient": 0.0,
+    "gamma_active": false,
+    "fixed_network_f_opt_unconstrained": 0.048756525644129765,
+    "fixed_network_f_opt_nonnegative": 0.048756525644129765,
+    "pde_at_current_f": 0.025207190944836356,
+    "pde_at_zero_f": 0.08644645081755112,
+    "field_checks": {
+      "sensor_theta_mse": 0.002163893838082436,
+      "sensor_rms_C": 0.9303534464024811,
+      "uniform_pde_mse": 0.04018782868314738,
+      "probe_bc_mse": 0.0035588521741763005,
+      "selection_score": 0.9093042160902981
+    }
+  },
+  {
+    "step": 2000,
+    "stage": "adam",
+    "f": 0.05000000000000001,
+    "raw_losses": {
+      "data": 0.0012875273167929102,
+      "pde": 0.012915621222498676,
+      "bc": 0.0024296768840958416
+    },
+    "net_gradient_norm": {
+      "data": 0.17674094764428924,
+      "pde": 1.371355431293582,
+      "bc": 0.17201653032977218
+    },
+    "weighted_net_gradient_norm": {
+      "data": 0.17674094764428924,
+      "pde": 1.371355431293582,
+      "bc": 0.17201653032977218
+    },
+    "data_pde_net_gradient_cosine": 0.005759862391817317,
+    "gamma_pde_gradient": 0.002158020480581596,
+    "gamma_data_direct_gradient": 0.0,
+    "gamma_active": false,
+    "fixed_network_f_opt_unconstrained": 0.049162839835196384,
+    "fixed_network_f_opt_nonnegative": 0.049162839835196384,
+    "pde_at_current_f": 0.012915621222498676,
+    "pde_at_zero_f": 0.07520227248187648,
+    "field_checks": {
+      "sensor_theta_mse": 0.0012875273167929102,
+      "sensor_rms_C": 0.7176426176845716,
+      "uniform_pde_mse": 0.01631907766278687,
+      "probe_bc_mse": 0.0024296768840958416,
+      "selection_score": 0.5337596812640467
+    }
+  },
+  {
+    "step": 5000,
+    "stage": "final",
+    "f": 0.005647737572635434,
+    "raw_losses": {
+      "data": 0.000193043749417239,
+      "pde": 0.0003827376561989954,
+      "bc": 0.00043353572280790275
+    },
+    "net_gradient_norm": {
+      "data": 0.04193598792236833,
+      "pde": 0.05854090377646046,
+      "bc": 0.06277183866772405
+    },
+    "weighted_net_gradient_norm": {
+      "data": 0.04193598792236833,
+      "pde": 0.05854090377646046,
+      "bc": 0.06277183866772405
+    },
+    "data_pde_net_gradient_cosine": -0.44774192053117357,
+    "gamma_pde_gradient": 5.04468843100869e-05,
+    "gamma_data_direct_gradient": 0.0,
+    "gamma_active": true,
+    "fixed_network_f_opt_unconstrained": 0.00547448374539636,
+    "fixed_network_f_opt_nonnegative": 0.00547448374539636,
+    "pde_at_current_f": 0.00038273765619899544,
+    "pde_at_zero_f": 0.0011545258950048914,
+    "field_checks": {
+      "sensor_theta_mse": 0.000193043749417239,
+      "sensor_rms_C": 0.2778803695241814,
+      "uniform_pde_mse": 0.0004698672572932128,
+      "probe_bc_mse": 0.0004335357228079028,
+      "selection_score": 0.07812090274699672
+    }
+  }
+]

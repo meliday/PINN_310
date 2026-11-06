@@ -207,5 +207,58 @@ class TrainingLoopTests(unittest.TestCase):
             pinn.sample_interior(10, self.known, gen, heater_frac=1.5)
 
 
+class SinkTermTests(unittest.TestCase):
+    """E5b: known-position sink in the PINN source, with fixed or learned strength."""
+
+    def setUp(self):
+        self.known = common.load_known_e5b()
+
+    def _grid(self, nx=401, ny=321):
+        gx, gy = np.linspace(0, 1.0, nx), np.linspace(0, 0.8, ny)
+        X, Y = np.meshgrid(gx, gy, indexing="ij")
+        return gx, gy, X, torch.tensor(np.c_[X.ravel(), Y.ravel()], dtype=DT)
+
+    def test_base_model_source_unchanged(self):
+        model = pinn.HeatPINN(common.load_known())
+        self.assertFalse(model.has_sink)
+        xy = _pts()
+        torch.testing.assert_close(model.source(xy, self.known), pinn.source(xy, self.known), atol=0, rtol=0)
+
+    def test_fixed_sink_removes_requested_fraction(self):
+        model = pinn.HeatPINN(self.known, sink=0.1)
+        gx, gy, X, xy = self._grid()
+        with torch.no_grad():
+            removed = (pinn.source(xy, self.known) - model.source(xy, self.known)).numpy().reshape(X.shape)
+        heater = pinn.source(xy, self.known).numpy().reshape(X.shape)
+        frac = pinn._trapz2(removed, gx, gy) / pinn._trapz2(heater, gx, gy)
+        self.assertAlmostEqual(frac, 0.1, places=10)
+        self.assertNotIn("gamma", dict(model.named_parameters()))
+
+    def test_learned_sink_is_trained_and_gets_gradient(self):
+        torch.manual_seed(0)
+        model = pinn.HeatPINN(self.known, sink="learn")
+        self.assertIn("gamma", dict(model.named_parameters()))
+        self.assertAlmostEqual(float(model.sink_fraction().detach()), 0.05, places=12)
+        gen = torch.Generator().manual_seed(0)
+        interior = pinn.sample_interior(200, self.known, gen)
+        walls = pinn.sample_walls(20, self.known, gen)
+        total, _ = pinn.losses(model, self.known, interior, walls)
+        total.backward()
+        self.assertTrue(torch.isfinite(model.gamma.grad) and model.gamma.grad.abs() > 0)
+        history, status = pinn.train(model, self.known, {**SMALL, "adam_steps": 3})
+        self.assertEqual(status["status"], "completed")
+        self.assertIn("sink_fraction", history[-1])
+        self.assertNotAlmostEqual(history[-1]["sink_fraction"], 0.05, places=8)
+
+    def test_heat_flows_report_sink_share(self):
+        model = pinn.HeatPINN(self.known, bi_fixed=(1.0, 0.4, 0.25), sink=0.1)
+        fl = pinn.heat_flows(model, self.known, n=101)
+        self.assertAlmostEqual(fl["share_sink"], 0.1, places=12)
+
+    def test_sink_requires_geometry(self):
+        with self.assertRaises(ValueError):
+            pinn.HeatPINN(common.load_known(), sink="learn")
+
+
 if __name__ == "__main__":
     unittest.main()

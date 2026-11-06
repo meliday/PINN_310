@@ -16,6 +16,9 @@ except ImportError:
 
 BI_BOUNDS = (0.01, 50.0)
 DEFAULT_STARTS = ((1.0, 1.0, 1.0), (0.1, 0.1, 0.1), (5.0, 5.0, 5.0))
+# E5b: Bi (S, E, N) + sink strength f (fraction of heater power), fixed before the run (LOG-053).
+SINK_BOUNDS = (0.001, 0.5)
+SINK_STARTS = ((1.0, 1.0, 1.0, 0.05), (0.1, 0.1, 0.1, 0.05), (5.0, 5.0, 5.0, 0.05), (1.0, 1.0, 1.0, 0.3))
 
 
 def reconstruct_rbf(obs_xy, obs_theta, query_xy):
@@ -28,20 +31,25 @@ def reconstruct_rbf(obs_xy, obs_theta, query_xy):
 def fit_fd_inverse(obs, known, experiment=None):
     """Least-squares fit of beta = log Bi (S, E, N) to sensor theta on the 101 x 81 grid.
 
-    experiment: optional dict with 'starts' (Bi triples), 'nx', 'max_nfev'.
+    experiment: optional dict with 'starts' (Bi triples), 'nx', 'max_nfev', and 'sink'.
+    With sink=True (E5b) a fourth unknown log f is fitted, f being the fraction of heater
+    power removed by the known-position sink in known["sink"]; starts are then 4-tuples.
     Runs every start, keeps all results, and selects the lowest training cost among
     starts the optimizer reports as converged; status is 'failed' if none converged.
     """
     experiment = experiment or {}
     nx = experiment.get("nx", fd.INVERSE_NX)
-    starts = experiment.get("starts", DEFAULT_STARTS)
+    sink = bool(experiment.get("sink", False))
+    starts = experiment.get("starts", SINK_STARTS if sink else DEFAULT_STARTS)
     max_nfev = experiment.get("max_nfev", 200)
-    lo, hi = np.log(BI_BOUNDS[0]), np.log(BI_BOUNDS[1])
+    lo = np.log([BI_BOUNDS[0]] * 3 + ([SINK_BOUNDS[0]] if sink else []))
+    hi = np.log([BI_BOUNDS[1]] * 3 + ([SINK_BOUNDS[1]] if sink else []))
     n_solves = [0]
 
     def predict(beta):
         n_solves[0] += 1
-        x, y, theta, _ = fd.solve_field(np.exp(beta), known, nx=nx)
+        f = float(np.exp(beta[3])) if sink else None
+        x, y, theta, _ = fd.solve_field(np.exp(beta[:3]), known, nx=nx, sink_fraction=f)
         return fd.sample(x, y, theta, obs.xy)
 
     def residual(beta):
@@ -60,7 +68,8 @@ def fit_fd_inverse(obs, known, experiment=None):
             finite = bool(np.all(np.isfinite(res.x)) and np.isfinite(res.cost))
             runs.append({
                 "start": list(start), "ok": finite and bool(res.success),
-                "Bi": dict(zip(common.ROBIN_WALLS, np.exp(res.x))),
+                "Bi": dict(zip(common.ROBIN_WALLS, np.exp(res.x[:3]))),
+                "sink_fraction": float(np.exp(res.x[3])) if sink else None,
                 "beta": res.x, "cost": float(res.cost), "status": int(res.status),
                 "message": res.message, "nfev": int(res.nfev),
                 "n_solves": n_solves[0] - s0, "jac": res.jac,
@@ -84,6 +93,7 @@ def fit_fd_inverse(obs, known, experiment=None):
     return {
         "status": "completed",
         "Bi": best["Bi"],
+        "sink_fraction": best["sink_fraction"],
         "beta": best["beta"],
         "selected_start": best["start"],
         "n_converged": len(ok),

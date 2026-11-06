@@ -1,0 +1,87 @@
+{
+  "purpose": "oracle forward diagnostic, not inverse recovery",
+  "smoke": false,
+  "source_sha256": "ddbe8057527423d146cfb5d3f69fdeb9aab5f4407a94e72e9c37990a681e2f54",
+  "experiment": {
+    "seed": 0,
+    "hidden": 64,
+    "depth": 4,
+    "n_interior": 1000,
+    "n_wall": 100,
+    "heater_frac": 0.3,
+    "lr_net": 0.001,
+    "lr_beta": 0.003,
+    "adam_steps": 20000,
+    "resample_every": 500,
+    "lbfgs_iters": 100,
+    "lambda_pde": 1.0,
+    "lambda_bc": 1.0,
+    "lambda_data": 1.0,
+    "log_every": 100,
+    "time_budget_s": null,
+    "threads": null
+  },
+  "training_status": {
+    "status": "completed",
+    "stage": "lbfgs",
+    "reason": null,
+    "adam_steps_done": 20000,
+    "lbfgs": "completed",
+    "wall_time_s": 332.22781512499205,
+    "device": "cpu",
+    "threads": 8,
+    "dtype": "torch.float64"
+  },
+  "oracle_Bi": {
+    "S": 1.0,
+    "E": 0.4,
+    "N": 0.25
+  },
+  "oracle_f": 0.1,
+  "relative_L2": 0.0004841396906189796,
+  "temperature_rmse_C": 0.008796667814704819,
+  "heat_flows": {
+    "flux": {
+      "S": 0.6192103301397203,
+      "N": 0.08424346246650646,
+      "E": 0.2056975993312664
+    },
+    "flux_grad": {
+      "S": 0.6198630753010912,
+      "N": 0.08506864471834859,
+      "W": 0.00012810796492752213,
+      "E": 0.20394284549785935
+    },
+    "source_integral": 1.0099140279053553,
+    "share_signed": {
+      "S": 0.6131317251073474,
+      "N": 0.08341646926247209,
+      "E": 0.20367832671648312
+    },
+    "share_outflow": {
+      "S": 0.6810860497283304,
+      "N": 0.09266164382917037,
+      "E": 0.22625230644249922
+    },
+    "inflow": {
+      "S": 0.0,
+      "N": 0.0,
+      "E": 0.0
+    },
+    "energy_balance_relerr": 0.00022652108630260976,
+    "gradient_balance_relerr": 7.926255621268407e-05,
+    "ranking": [
+      "S",
+      "E",
+      "N"
+    ],
+    "share_sink": 0.10000000000000002
+  },
+  "targets": {
+    "relative_L2_max": 0.01,
+    "energy_error_max": 0.01
+  },
+  "targets_met": true,
+  "fixed_coefficients_preserved": true,
+  "sensor_data_used_for_training": false
+}

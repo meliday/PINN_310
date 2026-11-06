@@ -1,0 +1,62 @@
+[
+  {
+    "resample": 0,
+    "within_1sigma": 149,
+    "within_2sigma": 280,
+    "n": 1000
+  },
+  {
+    "resample": 1,
+    "within_1sigma": 156,
+    "within_2sigma": 277,
+    "n": 1000
+  },
+  {
+    "resample": 2,
+    "within_1sigma": 135,
+    "within_2sigma": 275,
+    "n": 1000
+  },
+  {
+    "resample": 3,
+    "within_1sigma": 151,
+    "within_2sigma": 282,
+    "n": 1000
+  },
+  {
+    "resample": 4,
+    "within_1sigma": 144,
+    "within_2sigma": 285,
+    "n": 1000
+  },
+  {
+    "resample": 5,
+    "within_1sigma": 139,
+    "within_2sigma": 277,
+    "n": 1000
+  },
+  {
+    "resample": 6,
+    "within_1sigma": 128,
+    "within_2sigma": 276,
+    "n": 1000
+  },
+  {
+    "resample": 7,
+    "within_1sigma": 139,
+    "within_2sigma": 278,
+    "n": 1000
+  },
+  {
+    "resample": 8,
+    "within_1sigma": 139,
+    "within_2sigma": 280,
+    "n": 1000
+  },
+  {
+    "resample": 9,
+    "within_1sigma": 150,
+    "within_2sigma": 276,
+    "n": 1000
+  }
+]

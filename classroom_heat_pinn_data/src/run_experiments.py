@@ -7,6 +7,8 @@
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E3 --data A_noisy --seed 0
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E5 --seed 0
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E5b_ident
+    cd classroom_heat_pinn_data && python -m src.run_experiments --exp E5b_fd
+    cd classroom_heat_pinn_data && python -m src.run_experiments --exp E5b_pinn --seed 0
 
 Fitting (RBF, FD-inverse) receives only known.json and sensor observations.
 Truth is loaded afterwards through evaluate.py and every access is logged.
@@ -161,16 +163,18 @@ def _write_summary(out_dir, summary):
     (out_dir / "summary.json").write_text(json.dumps(common.to_jsonable(summary), indent=2))
 
 
-# Data sets whose truth is the base model files (config.json / *reference.npz). E5b sink
-# data have their own truth and must not be scored by E0/E2/E3.
-BASE_DATA = {"A_clean", "A_noisy", "B_clean", "B_noisy", "A_mismatch"}
+# Data sets whose truth is the base model files (config.json / reference.npz). E5b sink
+# data and A_mismatch (truth = mismatch_reference) have their own truth and must not be
+# scored by E0/E2/E3; they are evaluated only by their own runs (E5b, E5).
+BASE_DATA = {"A_clean", "A_noisy", "B_clean", "B_noisy"}
 BASE_DATA_EXPS = ("E0", "E2", "E3")
 
 
 def _validate_base_data(data_name, exp_id):
     if data_name not in BASE_DATA:
         raise ValueError(f"{exp_id} uses the base-model truth; {data_name!r} is not one of "
-                         f"{sorted(BASE_DATA)}. E5b sink data are evaluated only by E5b runs.")
+                         f"{sorted(BASE_DATA)}. E5b sink data are evaluated only by E5b runs, "
+                         f"A_mismatch only by E5.")
 
 
 class RunExistsError(RuntimeError):
@@ -1003,6 +1007,217 @@ def _plot_e5b_ident(cases, sigma, f_sens, obs, path):
     plt.close(fig)
 
 
+E5B_FD_DATA = ("A_sink_clean", "A_sink_noisy")
+
+
+def run_e5b_fd(overwrite=False):
+    """E5b 2d: FD-inverse of Bi (S, E, N) + sink strength f, plus the no-sink 3-parameter fit
+    on the same data as a bias control. Pre-registered in LOG-053. Truth is read after fitting.
+    """
+    known = common.load_known_e5b()
+    out_dir = common.RESULTS_DIR / "e5b" / "fd_A_sink"
+    _claim_run_dir(out_dir, overwrite)
+    obs_all = {name: common.load_observations(name, known) for name in E5B_FD_DATA}
+
+    # ---- fitting: observations + known_e5b only
+    fits = {}
+    for name, obs in obs_all.items():
+        fits[name] = {"sink": baselines.fit_fd_inverse(obs, known, {"sink": True}),
+                      "nosink": baselines.fit_fd_inverse(obs, known)}
+    (out_dir / "fd_inverse_runs.json").write_text(json.dumps(common.to_jsonable(
+        {n: {k: f["runs"] for k, f in v.items()} for n, v in fits.items()}), indent=1))
+
+    # ---- evaluation (truth access logged)
+    evaluate._log_access("config_e5b.json", "E5b 2d evaluation: true Bi, sink fraction, wall shares")
+    cfg = json.loads((common.E5B_DIR / "config_e5b.json").read_text())
+    evaluate._log_access("reference_e5b.npz", "E5b 2d evaluation: Q1 metrics")
+    with np.load(common.E5B_DIR / "reference_e5b.npz") as r:
+        ref = {k: r[k] for k in r.files}
+    bi_true = common.bi_dict(cfg["Bi_true"])
+    f_true = float(cfg["sink"]["fraction_of_heater"])
+    share_true = cfg["wall_flow_share_of_heater_true"]
+    ident_path = common.RESULTS_DIR / "e5b" / "ident" / "summary.json"
+    std_noisy = json.loads(ident_path.read_text())["cases"]["sink_f_unknown"]["rel_std"]["0.1C"] if ident_path.exists() else None
+    xq, yq = ref["x"], ref["y"]
+    Xq, Yq = np.meshgrid(xq, yq, indexing="ij")
+    query = np.c_[Xq.ravel(), Yq.ravel()]
+    q1_cols = ("q1_rmse_C", "q1_maxabs_C", "q1_wall_rmse_C")
+
+    rows, results, fig_fields = [], {}, {}
+    for name, obs in obs_all.items():
+        data_file = f"sensors_{name}.csv"
+        results[name], fig_fields[name] = {}, {}
+        for kind, fit in fits[name].items():
+            method = "FD_inverse_sink" if kind == "sink" else "FD_inverse_nosink"
+            if fit["status"] != "completed":
+                rows.append(evaluate.metrics_row(exp_id="E5b", method=method, data_file=data_file, status="failed",
+                                                 n_unknown=4 if kind == "sink" else 3, wall_time_s=fit["wall_time_s"],
+                                                 notes=f"FD-inverse {fit.get('reason')}"))
+                results[name][kind] = {k: v for k, v in fit.items() if k != "runs"}
+                continue
+            f_hat = fit["sink_fraction"]
+            x, y, th, info = fd.solve_field(fit["Bi"], known, nx=fit["nx"], sink_fraction=f_hat)
+            flows = fd.heat_flows(info)
+            theta_hat = fd.sample(x, y, th, query).reshape(Xq.shape)
+            q1 = evaluate.q1_metrics(theta_hat, ref, obs, known)
+            m = {f"bi_{w}_hat": fit["Bi"][w] for w in common.ROBIN_WALLS}
+            m.update({f"bi_{w}_relerr": fit["Bi"][w] / bi_true[w] - 1 for w in common.ROBIN_WALLS})
+            m.update({f"flux_{w}": flows["flux"][w] for w in common.ROBIN_WALLS})
+            m.update({f"share_{w}_err_pp": 100 * (flows["share_signed"][w] - share_true[w]) for w in common.ROBIN_WALLS})
+            m["source_integral"] = flows["source_integral"]
+            m["ranking_correct"] = flows["ranking"] == sorted(share_true, key=lambda w: -share_true[w])
+            m["energy_balance_relerr"] = flows["energy_balance_relerr"]
+            extra = {"sink_fraction_hat": f_hat, "share_sink_hat": flows.get("share_sink", 0.0),
+                     "sensor_rms_C": fit["sensor_rms_C"], "jacobian": fit["jacobian"],
+                     "n_converged": fit["n_converged"], "selected_start": fit["selected_start"]}
+            if kind == "sink":
+                extra["sink_fraction_relerr"] = f_hat / f_true - 1
+                if name.endswith("noisy") and std_noisy:
+                    extra["relerr_over_local_std"] = {
+                        **{f"log Bi_{w}": m[f"bi_{w}_relerr"] / std_noisy[f"log Bi_{w}"] for w in common.ROBIN_WALLS},
+                        "log f": extra["sink_fraction_relerr"] / std_noisy["log f"]}
+            note = (f"f_hat={f_hat:.6g} (true {f_true:g}); " if kind == "sink" else "no-sink control; ")
+            rows.append(evaluate.metrics_row(
+                exp_id="E5b", method=method, data_file=data_file, status="completed",
+                n_unknown=4 if kind == "sink" else 3, wall_time_s=fit["wall_time_s"], **m,
+                **{k: q1[k] for k in q1_cols},
+                notes=note + f"{fit['n_converged']}/{len(fit['runs'])} starts converged; shares of heater power"))
+            results[name][kind] = {"status": "completed", "Bi": fit["Bi"], "metrics": m, "q1": q1,
+                                   "heat_flows": flows, **extra}
+            fig_fields[name][("FD with sink (Bi+f)" if kind == "sink" else "FD no sink (Bi only)")] = (theta_hat, flows)
+    write_metrics(rows)
+
+    # Any unconverged fit makes the whole run failed (CLI exit 2), so a partial failure is not reported as success.
+    failed_fits = [f"{name}/{kind}" for name, d in fits.items() for kind, fit in d.items()
+                   if fit["status"] != "completed"]
+    summary = {
+        "exp_id": "E5b", "run": "fd_A_sink", "status": "failed" if failed_fits else "completed",
+        "failed_fits": failed_fits, "environment": environment(),
+        "note": ("E5b 2d (user-requested extension): FD-inverse with a known-position sink of unknown strength, "
+                 "and the no-sink 3-parameter fit as a bias control. Single noise realisation."),
+        "preregistration": "LOG-053", "bounds": {"Bi": baselines.BI_BOUNDS, "f": baselines.SINK_BOUNDS},
+        "starts": {"sink": baselines.SINK_STARTS, "nosink": baselines.DEFAULT_STARTS},
+        "truth": {"Bi": bi_true, "f": f_true, "wall_share_of_heater": share_true},
+        "local_rel_std_0.1C": std_noisy, "results": results,
+    }
+    _write_summary(out_dir, summary)
+    for name, fields in fig_fields.items():
+        if not fields:
+            # All fits for this observation failed; summary/metrics retain the
+            # failures, but there is no predicted field to compare or plot.
+            continue
+        shares = {"Truth": {**share_true, "sink": f_true}}
+        shares.update({k: {**fl["share_signed"], "sink": fl.get("share_sink", 0.0)} for k, (_, fl) in fields.items()})
+        plot_compare(ref, {k: th for k, (th, _) in fields.items()}, obs_all[name], shares, known,
+                     common.RESULTS_DIR / "figures" / f"e5b_fd_{name}.png",
+                     f"E5b FD {name} — simplified 2D model + known-position sink, synthetic, single realisation")
+    return summary
+
+
+def run_e5b_pinn(seed=0, overwrite=False):
+    """E5b 2e: PINN with the known-position sink and learned strength f (pre-registered in LOG-055).
+
+    Config = E2 C1 unchanged, beta = 0, f starts at 0.05. Same data, metrics and truth as run_e5b_fd;
+    the stored FD results of the same data are copied into the summary for comparison.
+    """
+    import torch
+    try:
+        from . import pinn
+    except ImportError:
+        import src.pinn as pinn
+
+    known = common.load_known_e5b()
+    run = f"pinn_A_sink_seed{seed}"
+    out_dir = common.RESULTS_DIR / "e5b" / run
+    _claim_run_dir(out_dir, overwrite)
+    exp = {**pinn.DEFAULT_EXPERIMENT, **E2_EXPERIMENT, **E2_CONFIGS[E3_CONFIG], "seed": seed}
+    obs_all = {name: common.load_observations(name, known) for name in E5B_FD_DATA}
+
+    # ---- training: observations + known_e5b only
+    trained = {}
+    for name, obs in obs_all.items():
+        torch.manual_seed(seed)
+        model = pinn.HeatPINN(known, hidden=exp["hidden"], depth=exp["depth"], sink="learn", sink_init=0.05)
+        history, status = pinn.train(model, known, exp, obs=obs)
+        pinn.save_checkpoint(out_dir / f"checkpoint_{name}.pt", model, exp, history, status,
+                             extra={"exp_id": "E5b", "data": name, "config": E3_CONFIG, "sink": "learn, init 0.05"})
+        (out_dir / f"history_{name}.json").write_text(json.dumps(common.to_jsonable(history), indent=1))
+        trained[name] = (model, status)
+
+    # ---- evaluation (truth access logged)
+    evaluate._log_access("config_e5b.json", "E5b 2e evaluation: true Bi, sink fraction, wall shares")
+    cfg = json.loads((common.E5B_DIR / "config_e5b.json").read_text())
+    evaluate._log_access("reference_e5b.npz", "E5b 2e evaluation: Q1 metrics")
+    with np.load(common.E5B_DIR / "reference_e5b.npz") as r:
+        ref = {k: r[k] for k in r.files}
+    bi_true = common.bi_dict(cfg["Bi_true"])
+    f_true = float(cfg["sink"]["fraction_of_heater"])
+    share_true = cfg["wall_flow_share_of_heater_true"]
+    ident_path = common.RESULTS_DIR / "e5b" / "ident" / "summary.json"
+    std_noisy = json.loads(ident_path.read_text())["cases"]["sink_f_unknown"]["rel_std"]["0.1C"] if ident_path.exists() else None
+    fd_path = common.RESULTS_DIR / "e5b" / "fd_A_sink" / "summary.json"
+    fd_saved = json.loads(fd_path.read_text())["results"] if fd_path.exists() else {}
+    q1_cols = ("q1_rmse_C", "q1_maxabs_C", "q1_wall_rmse_C")
+
+    rows, results = [], {}
+    for name, obs in obs_all.items():
+        model, status = trained[name]
+        theta_hat = pinn.predict_grid(model, ref["x"], ref["y"])
+        q1 = evaluate.q1_metrics(theta_hat, ref, obs, known)
+        flows = pinn.heat_flows(model, known)
+        bi_hat = dict(zip(common.ROBIN_WALLS, model.bi().detach().tolist()))
+        f_hat = float(model.sink_fraction().detach())
+        m = {f"bi_{w}_hat": bi_hat[w] for w in common.ROBIN_WALLS}
+        m.update({f"bi_{w}_relerr": bi_hat[w] / bi_true[w] - 1 for w in common.ROBIN_WALLS})
+        m.update({f"flux_{w}": flows["flux"][w] for w in common.ROBIN_WALLS})
+        m.update({f"share_{w}_err_pp": 100 * (flows["share_signed"][w] - share_true[w]) for w in common.ROBIN_WALLS})
+        m["source_integral"] = flows["source_integral"]
+        m["ranking_correct"] = flows["ranking"] == sorted(share_true, key=lambda w: -share_true[w])
+        m["energy_balance_relerr"] = flows["energy_balance_relerr"]
+        res = {"Bi": bi_hat, "sink_fraction_hat": f_hat, "sink_fraction_relerr": f_hat / f_true - 1,
+               "metrics": m, "q1": q1, "heat_flows": flows, "train_status": status,
+               "sensor_rms_C": float(dT_rms(model, obs, known))}
+        if name.endswith("noisy") and std_noisy:
+            res["relerr_over_local_std"] = {
+                **{f"log Bi_{w}": m[f"bi_{w}_relerr"] / std_noisy[f"log Bi_{w}"] for w in common.ROBIN_WALLS},
+                "log f": res["sink_fraction_relerr"] / std_noisy["log f"]}
+        if "sink" in fd_saved.get(name, {}):
+            res["fd_sink_same_data"] = {k: fd_saved[name]["sink"][k] for k in ("Bi", "sink_fraction_hat", "q1")}
+        results[name] = res
+        rows.append(evaluate.metrics_row(
+            exp_id="E5b", method=f"PINN_inverse_{E3_CONFIG}_sink", data_file=f"sensors_{name}.csv", seed=seed,
+            status=status["status"], n_unknown=4, wall_time_s=status.get("wall_time_s"), **m,
+            **{k: q1[k] for k in q1_cols},
+            notes=f"f_hat={f_hat:.6g} (true {f_true:g}); config {E3_CONFIG} fixed, f init 0.05; shares of heater power"))
+    write_metrics(rows)
+
+    summary = {
+        "exp_id": "E5b", "run": run, "environment": environment(), "torch": torch.__version__,
+        "note": ("E5b 2e (user-requested extension): PINN with known-position sink of learned strength. "
+                 "Single seed, single noise realisation. Pre-registered in LOG-055."),
+        "experiment": exp, "sink_init": 0.05,
+        "truth": {"Bi": bi_true, "f": f_true, "wall_share_of_heater": share_true},
+        "local_rel_std_0.1C": std_noisy, "results": results,
+        "status": "completed" if all(st["status"] == "completed" for _, st in trained.values()) else "failed",
+    }
+    _write_summary(out_dir, summary)
+    for name, obs in obs_all.items():
+        model, _ = trained[name]
+        fields = {f"PINN ({E3_CONFIG}, sink learned)": pinn.predict_grid(model, ref["x"], ref["y"])}
+        shares = {"Truth": {**share_true, "sink": f_true},
+                  f"PINN ({E3_CONFIG})": {**results[name]["heat_flows"]["share_signed"],
+                                          "sink": results[name]["heat_flows"].get("share_sink", 0.0)}}
+        if "sink" in fd_saved.get(name, {}):
+            fdr = fd_saved[name]["sink"]
+            x, y, th, _ = fd.solve_field(fdr["Bi"], known, nx=fd.INVERSE_NX, sink_fraction=fdr["sink_fraction_hat"])
+            Xq, Yq = np.meshgrid(ref["x"], ref["y"], indexing="ij")
+            fields = {"FD (Bi+f)": fd.sample(x, y, th, np.c_[Xq.ravel(), Yq.ravel()]).reshape(Xq.shape), **fields}
+            shares["FD (Bi+f)"] = {**fdr["heat_flows"]["share_signed"], "sink": fdr["heat_flows"].get("share_sink", 0.0)}
+        plot_compare(ref, fields, obs, shares, known, common.RESULTS_DIR / "figures" / f"e5b_{run}_{name}.png",
+                     f"E5b PINN {name} — simplified 2D model + known-position sink, synthetic, single seed")
+    return summary
+
+
 def dT_rms(model, obs, known):
     import torch
     with torch.no_grad():
@@ -1016,7 +1231,7 @@ DEFAULT_DATA = {"E0": "A_clean", "E2": "A_clean", "E3": "A_noisy", "E5": E5_DATA
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--exp", required=True, choices=["E0", "E1", "E2", "E3", "E5", "E5b_ident"])
+    p.add_argument("--exp", required=True, choices=["E0", "E1", "E2", "E3", "E5", "E5b_ident", "E5b_fd", "E5b_pinn"])
     p.add_argument("--data", default=None,
                    help="sensor data name; default per experiment: " +
                         ", ".join(f"{k}={v}" for k, v in DEFAULT_DATA.items()))
@@ -1045,6 +1260,22 @@ def main(argv=None):
 
 
 def _dispatch(args):
+    if args.exp == "E5b_pinn":
+        s = run_e5b_pinn(args.seed, args.overwrite)
+        print(json.dumps(common.to_jsonable({"status": s["status"], "truth": s["truth"], "results": {
+            n: {k: v.get(k) for k in ("Bi", "sink_fraction_hat", "sink_fraction_relerr", "relerr_over_local_std",
+                                      "sensor_rms_C", "q1", "metrics", "train_status", "fd_sink_same_data")}
+            for n, v in s["results"].items()}}), indent=1))
+        sys.exit(0 if s["status"] == "completed" else 2)
+    if args.exp == "E5b_fd":
+        s = run_e5b_fd(args.overwrite)
+        print(json.dumps(common.to_jsonable({"status": s["status"], "failed_fits": s["failed_fits"],
+                                             "truth": s["truth"], "results": {
+            n: {k: {kk: v.get(kk) for kk in ("status", "Bi", "sink_fraction_hat", "sink_fraction_relerr",
+                                              "relerr_over_local_std", "sensor_rms_C", "n_converged", "q1",
+                                              "metrics")} for k, v in d.items()}
+            for n, d in s["results"].items()}}), indent=1))
+        sys.exit(0 if s["status"] == "completed" else 2)
     if args.exp == "E5b_ident":
         s = run_e5b_ident(args.overwrite)
         print(json.dumps(common.to_jsonable({k: s[k] for k in ("evaluated_at", "cases", "f_sensitivity_per_sensor_C")}),

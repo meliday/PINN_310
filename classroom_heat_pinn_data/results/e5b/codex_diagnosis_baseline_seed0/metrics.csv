@@ -1,0 +1,2 @@
+variant,data,adam_steps,f_hat,f_relerr,q1_rmse_C,sensor_rms_C,uniform_pde_mse,selection_score
+baseline,A_sink_clean,20000,0.0004637895240916395,-0.9953621047590836,0.1813486130790488,0.2213474096122772,8.240360398649823e-05,0.04913265997966053

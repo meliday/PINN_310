@@ -1,0 +1,263 @@
+{
+  "exp_id": "E5b",
+  "run": "pinn_A_sink_seed0",
+  "environment": {
+    "python": "3.12.13",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "platform": "macOS-27.0.1-arm64-arm-64bit",
+    "machine": "arm64"
+  },
+  "torch": "2.13.0",
+  "note": "E5b 2e (user-requested extension): PINN with known-position sink of learned strength. Single seed, single noise realisation. Pre-registered in LOG-055.",
+  "experiment": {
+    "seed": 0,
+    "hidden": 64,
+    "depth": 4,
+    "n_interior": 1000,
+    "n_wall": 100,
+    "heater_frac": 0.3,
+    "lr_net": 0.001,
+    "lr_beta": 0.003,
+    "adam_steps": 20000,
+    "resample_every": 500,
+    "lbfgs_iters": 100,
+    "lambda_pde": 1.0,
+    "lambda_bc": 1.0,
+    "lambda_data": 1.0,
+    "log_every": 100,
+    "time_budget_s": null,
+    "threads": null
+  },
+  "sink_init": 0.05,
+  "truth": {
+    "Bi": {
+      "S": 1.0,
+      "E": 0.4,
+      "N": 0.25
+    },
+    "f": 0.1,
+    "wall_share_of_heater": {
+      "S": 0.6130793026552595,
+      "E": 0.2035460458109048,
+      "N": 0.0833746515335979
+    }
+  },
+  "local_rel_std_0.1C": {
+    "log Bi_S": 0.025934552534035253,
+    "log Bi_E": 0.04905086118343402,
+    "log Bi_N": 0.09711191412322562,
+    "log f": 0.13556399323489265
+  },
+  "results": {
+    "A_sink_clean": {
+      "Bi": {
+        "S": 1.1467052813811838,
+        "E": 0.47694872820527945,
+        "N": 0.18685904321247906
+      },
+      "sink_fraction_hat": 0.0004637895240916395,
+      "sink_fraction_relerr": -0.9953621047590836,
+      "metrics": {
+        "bi_S_hat": 1.1467052813811838,
+        "bi_E_hat": 0.47694872820527945,
+        "bi_N_hat": 0.18685904321247906,
+        "bi_S_relerr": 0.14670528138118377,
+        "bi_E_relerr": 0.19237182051319857,
+        "bi_N_relerr": -0.25256382715008374,
+        "flux_S": 0.7041664969681074,
+        "flux_E": 0.2429231296759421,
+        "flux_N": 0.06336134286485498,
+        "share_S_err_pp": 8.417459966809627,
+        "share_E_err_pp": 3.699237920709858,
+        "share_N_err_pp": -2.0635308268635426,
+        "source_integral": 1.0099140279053553,
+        "ranking_correct": true,
+        "energy_balance_relerr": 0.0009954601304134286
+      },
+      "q1": {
+        "q1_rmse_C": 0.1813486130790488,
+        "q1_maxabs_C": 0.6651658296313778,
+        "q1_wall_rmse_C": 0.2538179997426151,
+        "q1_rmse_in_hull_C": 0.12325629010990441,
+        "q1_rmse_out_hull_C": 0.22801734320557013,
+        "frac_out_hull": 0.4808506692219715,
+        "n_eval_points": 32351
+      },
+      "heat_flows": {
+        "flux": {
+          "S": 0.7041664969681074,
+          "N": 0.06336134286485498,
+          "E": 0.2429231296759421
+        },
+        "flux_grad": {
+          "S": 0.7041374366418879,
+          "N": 0.0631109041064909,
+          "W": -3.897944319333226e-05,
+          "E": 0.24266301124250456
+        },
+        "source_integral": 1.0099140279053553,
+        "share_signed": {
+          "S": 0.6972539023233557,
+          "N": 0.06273934326496247,
+          "E": 0.24053842501800338
+        },
+        "share_outflow": {
+          "S": 0.6968833899089074,
+          "N": 0.06270600432562266,
+          "E": 0.24041060576546988
+        },
+        "inflow": {
+          "S": 0.0,
+          "N": 0.0,
+          "E": 0.0
+        },
+        "energy_balance_relerr": 0.0009954601304134286,
+        "gradient_balance_relerr": 0.000422543084776675,
+        "ranking": [
+          "S",
+          "E",
+          "N"
+        ],
+        "share_sink": 0.0004637895240916395
+      },
+      "train_status": {
+        "status": "completed",
+        "stage": "lbfgs",
+        "reason": null,
+        "adam_steps_done": 20000,
+        "lbfgs": "completed",
+        "wall_time_s": 334.0700938749942,
+        "device": "cpu",
+        "threads": 8,
+        "dtype": "torch.float64"
+      },
+      "sensor_rms_C": 0.2213474096122772,
+      "fd_sink_same_data": {
+        "Bi": {
+          "S": 0.9999662388750779,
+          "E": 0.4000657654145962,
+          "N": 0.24970257971233709
+        },
+        "sink_fraction_hat": 0.09996425013261852,
+        "q1": {
+          "q1_rmse_C": 0.0004764863996447241,
+          "q1_maxabs_C": 0.002030305083695616,
+          "q1_wall_rmse_C": 0.0005578681496801022,
+          "q1_rmse_in_hull_C": 0.00027718689308740623,
+          "q1_rmse_out_hull_C": 0.0006238666744208386,
+          "frac_out_hull": 0.4808506692219715,
+          "n_eval_points": 32351
+        }
+      }
+    },
+    "A_sink_noisy": {
+      "Bi": {
+        "S": 1.1401882403486623,
+        "E": 0.5106084448952788,
+        "N": 0.16125224301714486
+      },
+      "sink_fraction_hat": 0.00047816841339067326,
+      "sink_fraction_relerr": -0.9952183158660932,
+      "metrics": {
+        "bi_S_hat": 1.1401882403486623,
+        "bi_E_hat": 0.5106084448952788,
+        "bi_N_hat": 0.16125224301714486,
+        "bi_S_relerr": 0.14018824034866229,
+        "bi_E_relerr": 0.276521112238197,
+        "bi_N_relerr": -0.35499102793142057,
+        "flux_S": 0.698918242574291,
+        "flux_E": 0.25687389126938037,
+        "flux_N": 0.05469350282821547,
+        "share_S_err_pp": 7.897786583848343,
+        "share_E_err_pp": 5.080619029196221,
+        "share_N_err_pp": -2.921805867820971,
+        "source_integral": 1.0099140279053553,
+        "ranking_correct": true,
+        "energy_balance_relerr": 0.0010441658653886575
+      },
+      "q1": {
+        "q1_rmse_C": 0.19237719544936294,
+        "q1_maxabs_C": 0.6060759368470947,
+        "q1_wall_rmse_C": 0.276133292580361,
+        "q1_rmse_in_hull_C": 0.13302567054734452,
+        "q1_rmse_out_hull_C": 0.240541868669529,
+        "frac_out_hull": 0.4808506692219715,
+        "n_eval_points": 32351
+      },
+      "heat_flows": {
+        "flux": {
+          "S": 0.698918242574291,
+          "N": 0.05469350282821547,
+          "E": 0.25687389126938037
+        },
+        "flux_grad": {
+          "S": 0.6987143562504066,
+          "N": 0.05408783902826146,
+          "W": -0.00010535077845563972,
+          "E": 0.25703166589797943
+        },
+        "source_integral": 1.0099140279053553,
+        "share_signed": {
+          "S": 0.6920571684937429,
+          "N": 0.05415659285538819,
+          "E": 0.254352236102867
+        },
+        "share_outflow": {
+          "S": 0.6916656874769964,
+          "N": 0.05412595770124233,
+          "E": 0.2542083548217613
+        },
+        "inflow": {
+          "S": 0.0,
+          "N": 0.0,
+          "E": 0.0
+        },
+        "energy_balance_relerr": 0.0010441658653886575,
+        "gradient_balance_relerr": 0.00029447207683390837,
+        "ranking": [
+          "S",
+          "E",
+          "N"
+        ],
+        "share_sink": 0.00047816841339067326
+      },
+      "train_status": {
+        "status": "completed",
+        "stage": "lbfgs",
+        "reason": null,
+        "adam_steps_done": 20000,
+        "lbfgs": "completed",
+        "wall_time_s": 332.53885991699644,
+        "device": "cpu",
+        "threads": 8,
+        "dtype": "torch.float64"
+      },
+      "sensor_rms_C": 0.2078408205606027,
+      "relerr_over_local_std": {
+        "log Bi_S": 5.405462082474182,
+        "log Bi_E": 5.637436439782359,
+        "log Bi_N": -3.6554837903923025,
+        "log f": -7.341317499711533
+      },
+      "fd_sink_same_data": {
+        "Bi": {
+          "S": 1.0057459623156249,
+          "E": 0.44227279301597505,
+          "N": 0.21591188650466256
+        },
+        "sink_fraction_hat": 0.09109329075060824,
+        "q1": {
+          "q1_rmse_C": 0.07573116564992724,
+          "q1_maxabs_C": 0.2107398989196252,
+          "q1_wall_rmse_C": 0.09943125772488265,
+          "q1_rmse_in_hull_C": 0.06884201991262101,
+          "q1_rmse_out_hull_C": 0.0825258940807217,
+          "frac_out_hull": 0.4808506692219715,
+          "n_eval_points": 32351
+        }
+      }
+    }
+  },
+  "status": "completed"
+}

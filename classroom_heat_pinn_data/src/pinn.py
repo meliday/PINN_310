@@ -56,7 +56,10 @@ class MLP(nn.Module):
 
 
 class HeatPINN(nn.Module):
-    def __init__(self, known, hidden=64, depth=4, bi_fixed=None):
+    """sink (E5b): None (base model), "learn" (strength f = exp(gamma) is trained, start
+    f = sink_init), or a number (fixed f). The sink position/width come from known["sink"]."""
+
+    def __init__(self, known, hidden=64, depth=4, bi_fixed=None, sink=None, sink_init=0.05):
         super().__init__()
         self.LX, self.LY = known["domain"]["LX"], known["domain"]["LY"]
         self.net = MLP(self.LX, self.LY, hidden, depth).to(DTYPE)
@@ -70,15 +73,55 @@ class HeatPINN(nn.Module):
             self.register_buffer("beta", torch.log(torch.tensor([bi[w] for w in common.ROBIN_WALLS],
                                                                 dtype=DTYPE)))
             self.inverse = False
+        self.has_sink = sink is not None
+        if self.has_sink:
+            geom = common.sink_geometry(known)
+            if geom is None:
+                raise ValueError("sink requested but known has no sink geometry")
+            self.sink_geom = geom
+            heater_power, shape_integral = _domain_integrals(known, geom)
+            self.register_buffer("heater_power", torch.tensor(heater_power, dtype=DTYPE))
+            self.register_buffer("sink_shape_integral", torch.tensor(shape_integral, dtype=DTYPE))
+            if sink == "learn":
+                self.gamma = nn.Parameter(torch.tensor(np.log(sink_init), dtype=DTYPE))
+            else:
+                self.register_buffer("gamma", torch.tensor(np.log(float(sink)), dtype=DTYPE))
+        self.learn_sink = sink == "learn"
 
     def bi(self):
         return torch.exp(self.beta)
+
+    def sink_fraction(self):
+        return torch.exp(self.gamma) if self.has_sink else None
+
+    def source(self, xy, known):
+        """Heater minus (if any) the sink removing a fraction f of the heater power."""
+        q = source(xy, known)
+        if self.has_sink:
+            g = self.sink_geom
+            shape = torch.exp(-((xy[:, 0] - g["x"]) ** 2 + (xy[:, 1] - g["y"]) ** 2) / (2 * g["s"] ** 2))
+            q = q - self.sink_fraction() * self.heater_power / self.sink_shape_integral * shape
+        return q
 
     def forward(self, xy):
         return self.net(xy)
 
 
 # ------------------------------------------------------------------ physics
+def _trapz2(F, gx, gy):
+    return _trapz(np.array([_trapz(F[i], gy) for i in range(len(gx))]), gx)
+
+
+def _domain_integrals(known, geom, nx=401, ny=321):
+    """(heater power, sink shape integral) over the domain by the trapezoid rule."""
+    LX, LY = known["domain"]["LX"], known["domain"]["LY"]
+    gx, gy = np.linspace(0, LX, nx), np.linspace(0, LY, ny)
+    X, Y = np.meshgrid(gx, gy, indexing="ij")
+    q = source(torch.tensor(np.c_[X.ravel(), Y.ravel()], dtype=DTYPE), known).numpy().reshape(X.shape)
+    shape = np.exp(-((X - geom["x"]) ** 2 + (Y - geom["y"]) ** 2) / (2 * geom["s"] ** 2))
+    return _trapz2(q, gx, gy), _trapz2(shape, gx, gy)
+
+
 def source(xy, known, key="heater"):
     h = known[key]
     r2 = (xy[:, 0] - h["x"]) ** 2 + (xy[:, 1] - h["y"]) ** 2
@@ -100,7 +143,7 @@ def derivatives(fn, xy, second=True):
 
 def pde_residual(model, xy, known):
     _, _, lap = derivatives(model, xy)
-    return -lap - source(xy, known)
+    return -lap - model.source(xy, known)
 
 
 def bc_residuals(model, wall_pts):
@@ -199,17 +242,23 @@ def heat_flows(model, known, n=401):
     H = _trapz(np.array([_trapz(Q[i], gy) for i in range(len(gx))]), gx)
     out = {w: max(flux[w], 0.0) for w in flux}
     out_sum = sum(out.values())
-    return {
+    # With a sink (E5b) the walls carry heater - sink; shares stay relative to the heater (H).
+    sink_power = float(model.sink_fraction().detach()) * H if getattr(model, "has_sink", False) else 0.0
+    net = H - sink_power
+    flows = {
         "flux": flux, "flux_grad": flux_grad, "source_integral": H,
         "share_signed": {w: flux[w] / H for w in flux},
         "share_outflow": {w: (out[w] / out_sum if out_sum > 0 else None) for w in flux},
         "inflow": {w: min(flux[w], 0.0) for w in flux},
         # Robin-flux balance: zero only if PDE and all BCs (incl. adiabatic W) hold.
-        "energy_balance_relerr": abs(sum(flux.values()) - H) / max(abs(H), 1e-12),
+        "energy_balance_relerr": abs(sum(flux.values()) - net) / max(abs(H), 1e-12),
         # Gradient-flux balance over all four walls: checks the PDE (divergence theorem).
-        "gradient_balance_relerr": abs(sum(flux_grad.values()) - H) / max(abs(H), 1e-12),
+        "gradient_balance_relerr": abs(sum(flux_grad.values()) - net) / max(abs(H), 1e-12),
         "ranking": sorted(flux, key=lambda w: -flux[w]),
     }
+    if getattr(model, "has_sink", False):
+        flows["share_sink"] = sink_power / H
+    return flows
 
 
 def predict_grid(model, x, y, batch=20000):
@@ -249,6 +298,8 @@ def train(model, known, experiment=None, obs=None, on_log=None):
     groups = [{"params": list(model.net.parameters()), "lr": exp["lr_net"]}]
     if model.inverse:
         groups.append({"params": [model.beta], "lr": exp["lr_beta"]})
+    if getattr(model, "learn_sink", False):
+        groups.append({"params": [model.gamma], "lr": exp["lr_beta"]})
     opt = torch.optim.Adam(groups)
 
     # status["stage"] is the last optimizer that ran ("adam" or "lbfgs").
@@ -266,6 +317,8 @@ def train(model, known, experiment=None, obs=None, on_log=None):
                "loss": float(total), **{k: float(v) for k, v in parts.items()},
                "Bi": dict(zip(common.ROBIN_WALLS, model.bi().detach().tolist())),
                "beta_grad_norm": float(g.norm()) if g is not None else None}
+        if getattr(model, "has_sink", False):
+            rec["sink_fraction"] = float(model.sink_fraction().detach())
         history.append(rec)
         if on_log:
             on_log(rec)

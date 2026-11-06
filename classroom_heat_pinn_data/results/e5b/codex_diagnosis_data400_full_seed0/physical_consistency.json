@@ -1,0 +1,37 @@
+[
+  {
+    "variant": "baseline_full",
+    "f_hat": 0.0004637895240916395,
+    "network_sensor_rms_C": 0.2213474096122772,
+    "FD_at_PINN_coefficients_sensor_rms_C": 0.2282220897144186,
+    "network_to_FD_field_rms_C": 0.02022872963079922
+  },
+  {
+    "variant": "data400_short",
+    "f_hat": 0.005851550726781471,
+    "network_sensor_rms_C": 0.03943322579246487,
+    "FD_at_PINN_coefficients_sensor_rms_C": 0.4305304122001574,
+    "network_to_FD_field_rms_C": 0.5242468708202487
+  },
+  {
+    "variant": "sampling_short",
+    "f_hat": 0.00812950483486771,
+    "network_sensor_rms_C": 0.2727447180213081,
+    "FD_at_PINN_coefficients_sensor_rms_C": 0.3731436237825444,
+    "network_to_FD_field_rms_C": 0.2222918410467255
+  },
+  {
+    "variant": "freeze_short",
+    "f_hat": 0.005647737572635434,
+    "network_sensor_rms_C": 0.2778803695241814,
+    "FD_at_PINN_coefficients_sensor_rms_C": 0.3730823727955822,
+    "network_to_FD_field_rms_C": 0.21926944727961584
+  },
+  {
+    "variant": "data400_full",
+    "f_hat": 0.010052909964028734,
+    "network_sensor_rms_C": 0.026430278898972773,
+    "FD_at_PINN_coefficients_sensor_rms_C": 0.2536980187249493,
+    "network_to_FD_field_rms_C": 0.2802662084264811
+  }
+]

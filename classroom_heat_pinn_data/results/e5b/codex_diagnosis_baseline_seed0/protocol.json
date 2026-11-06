@@ -1,0 +1,18 @@
+{
+  "mode": "baseline",
+  "data": "A_sink_clean",
+  "seed": 0,
+  "development": true,
+  "source_hashes": {
+    "classroom_heat_pinn_data/src/pinn.py": "ddbe8057527423d146cfb5d3f69fdeb9aab5f4407a94e72e9c37990a681e2f54",
+    "classroom_heat_pinn_data/diagnostics/pinn_sink_diagnosis.py": "6c2f3c57984dd62e540464ce6c0e9b944d1371910615dc14185d10da8a720e9b",
+    "classroom_heat_pinn_data/src/run_experiments.py": "81f4882231641f7271f6931a4bbf4ec416827972a9319e66c6cb9680e7a50d52"
+  },
+  "reference_selection": false,
+  "selection": "minimum finite 400*sensor_theta_mse+uniform_pde_mse+bc_mse below baseline Adam5000",
+  "interventions": {
+    "data400": "lambda_data only",
+    "sink_sampling": "interior mixture only",
+    "freeze2000": "freeze gamma for 2000 Adam steps only"
+  }
+}
