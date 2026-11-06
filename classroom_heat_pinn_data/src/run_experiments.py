@@ -4,6 +4,7 @@
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E1 --seed 0
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E2 --data A_clean --seed 0
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E2 --data A_clean --seed 0 --config C1
+    cd classroom_heat_pinn_data && python -m src.run_experiments --exp E3 --data A_noisy --seed 0
 
 Fitting (RBF, FD-inverse) receives only known.json and sensor observations.
 Truth is loaded afterwards through evaluate.py and every access is logged.
@@ -501,6 +502,194 @@ def run_e2(data_name="A_clean", seed=0, config="base", overwrite=False):
     return summary
 
 
+# E3 keeps the E2 development config fixed (plan section 10): no tuning on these data.
+E3_CONFIG = "C1"
+# DATA_GUIDE: sensors_*_noisy = clean + N(0, 0.1 C). Used only for the FD uncertainty diagnostic
+# and labels. Mismatch data belong to E5 (offsets + model error), not to E3.
+NOISE_SIGMA_BY_KIND = {"clean": 0.0, "noisy": 0.1}
+
+
+def noise_sigma_C(data_name):
+    """Nominal sensor noise for an E3 data set, from its name (e.g. 'A_noisy' -> 0.1)."""
+    kind = data_name.rsplit("_", 1)[-1]
+    if kind not in NOISE_SIGMA_BY_KIND:
+        raise ValueError(f"E3 supports *_clean and *_noisy data, not {data_name!r}")
+    return NOISE_SIGMA_BY_KIND[kind]
+
+
+def fd_local_uncertainty(beta, obs, known, sigma_theta, h=1e-4):
+    """Diagnostic linearised std of beta = log Bi from sigma^2 (J^T J)^-1 (plan 12.2).
+
+    J = d theta_sensor / d beta by central differences on the 101 x 81 grid. Assumes an
+    exact model and Gaussian noise; returns rank/singular values and no covariance if rank-deficient.
+    """
+    J = np.zeros((len(obs.theta), 3))
+    for k in range(3):
+        cols = []
+        for sgn in (1, -1):
+            b = np.array(beta, float)
+            b[k] += sgn * h
+            x, y, th, _ = fd.solve_field(np.exp(b), known, nx=fd.INVERSE_NX)
+            cols.append(fd.sample(x, y, th, obs.xy))
+        J[:, k] = (cols[0] - cols[1]) / (2 * h)
+    sv = np.linalg.svd(J, compute_uv=False)
+    rank = int(np.sum(sv > sv[0] * 1e-10))
+    out = {"rank": rank, "singular_values": sv, "condition_number": float(sv[0] / sv[-1])}
+    if rank == 3:
+        cov = sigma_theta ** 2 * np.linalg.inv(J.T @ J)
+        out["rel_std_bi"] = dict(zip(common.ROBIN_WALLS, np.sqrt(np.diag(cov))))
+    return out
+
+
+def plot_e3(ref, fields, obs, flows, known, fig_dir, run, sigma_C):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    dT = common.dt_K(known)
+    extent = [0, known["domain"]["LX"], 0, known["domain"]["LY"]]
+    T_ref = dT * ref["theta"]
+    vmin, vmax = np.percentile(T_ref, [0.5, 99.5])
+    errs = {k: dT * (v - ref["theta"]) for k, v in fields.items()}
+    elim = max(np.abs(e).max() for e in errs.values())
+    n = 1 + len(fields)
+    fig, axes = plt.subplots(2, n, figsize=(4.2 * n, 6.4), constrained_layout=True)
+    for ax, (t, T) in zip(axes[0], [("Reference (synthetic truth)", T_ref)] + [(k, dT * v) for k, v in fields.items()]):
+        im = ax.imshow(T.T, origin="lower", extent=extent, vmin=vmin, vmax=vmax, cmap="inferno")
+        ax.set_title(t)
+    fig.colorbar(im, ax=axes[0], label="T [°C]")
+    for ax, (t, E) in zip(axes[1, 1:], errs.items()):
+        im2 = ax.imshow(E.T, origin="lower", extent=extent, vmin=-elim, vmax=elim, cmap="RdBu_r")
+        ax.set_title(f"{t} error")
+    fig.colorbar(im2, ax=axes[1, 1:], label="ΔT [°C]")
+    for ax in list(axes[0]) + list(axes[1, 1:]):  # field panels only, not the bar chart
+        ax.plot(obs.xy[:, 0], obs.xy[:, 1], "o", mfc="none", mec="cyan", ms=6)
+    # Signed wall-flow shares in the free bottom-left panel.
+    ax = axes[1, 0]
+    walls = list(common.ROBIN_WALLS)
+    xs = np.arange(len(walls))
+    width = 0.8 / len(flows)
+    for i, (name, fl) in enumerate(flows.items()):
+        ax.bar(xs + (i - (len(flows) - 1) / 2) * width, [100 * fl["share_signed"][w] for w in walls],
+               width=width, label=name)
+    ax.set_xticks(xs, ["S window", "E exterior", "N corridor"])
+    ax.set_ylabel("Signed flow / source [%]"); ax.legend(fontsize=8); ax.axhline(0, color="k", lw=0.8)
+    noise = f"noise {sigma_C:g} °C" if sigma_C > 0 else "clean (no noise)"
+    fig.suptitle(f"E3 {run} — simplified 2D model, synthetic data, {noise}, single seed, config {E3_CONFIG} fixed")
+    fig.savefig(fig_dir / f"e3_{run}.png", dpi=130)
+    plt.close(fig)
+
+
+def run_e3(data_name="A_noisy", seed=0, overwrite=False):
+    """Fixed-config comparison on a noisy (or other non-development) data set.
+
+    PINN uses E2 config C1 unchanged; FD-inverse and RBF use the E0 settings.
+    All fitting uses observations + known only; truth is loaded afterwards.
+    """
+    import torch
+    try:
+        from . import pinn
+    except ImportError:
+        import src.pinn as pinn
+
+    sigma_C = noise_sigma_C(data_name)  # before any output: unsupported data fail early
+    known = common.load_known()
+    obs = common.load_observations(data_name, known)
+    data_file = f"sensors_{data_name}.csv"
+    run = f"{data_name}_seed{seed}"
+    out_dir = common.RESULTS_DIR / "e3" / run
+    fig_dir = common.RESULTS_DIR / "figures"
+    _claim_run_dir(out_dir, overwrite)
+    exp = {**pinn.DEFAULT_EXPERIMENT, **E2_EXPERIMENT, **E2_CONFIGS[E3_CONFIG], "seed": seed}
+
+    # ---- fitting: no truth file is opened in this block
+    xq, yq = np.linspace(0, 1, fd.FINE_NX), np.linspace(0, 0.8, 161)
+    Xq, Yq = np.meshgrid(xq, yq, indexing="ij")
+    query = np.c_[Xq.ravel(), Yq.ravel()]
+    t0 = time.perf_counter()
+    theta_rbf = baselines.reconstruct_rbf(obs.xy, obs.theta, query).reshape(Xq.shape)
+    rbf_time = time.perf_counter() - t0
+
+    fit = baselines.fit_fd_inverse(obs, known)
+    (out_dir / "fd_inverse_runs.json").write_text(json.dumps(common.to_jsonable(fit["runs"]), indent=2))
+    fd_ok = fit["status"] == "completed"
+    if fd_ok:
+        xc, yc, th_fd, info_fd = fd.solve_field(fit["Bi"], known, nx=fit["nx"])
+        theta_fd = fd.sample(xc, yc, th_fd, query).reshape(Xq.shape)
+        flows_fd = fd.heat_flows(info_fd)
+        if sigma_C > 0:
+            unc = fd_local_uncertainty(fit["beta"], obs, known, sigma_C / common.dt_K(known))
+        else:
+            unc = {"skipped": "clean data: no measurement-noise model"}
+
+    torch.manual_seed(seed)
+    model = pinn.HeatPINN(known, hidden=exp["hidden"], depth=exp["depth"])
+    history, status = pinn.train(model, known, exp, obs=obs)
+    pinn.save_checkpoint(out_dir / "checkpoint.pt", model, exp, history, status,
+                         extra={"exp_id": "E3", "data_file": data_file, "config": E3_CONFIG})
+    bi_pinn = dict(zip(common.ROBIN_WALLS, model.bi().detach().tolist()))
+    flows_pinn = pinn.heat_flows(model, known)
+    theta_pinn = pinn.predict_grid(model, xq, yq)
+
+    # ---- evaluation (truth access logged)
+    ref = evaluate.load_reference(f"E3 evaluation: Q1 metrics ({data_file})")
+    if not (np.allclose(ref["x"], xq) and np.allclose(ref["y"], yq)):
+        raise ValueError("reference grid differs from the evaluation query grid")
+    bi_true, flows_true = evaluate.true_heat_flows(known, "E3 evaluation: true Bi and heat flows")
+    q1_cols = ("q1_rmse_C", "q1_maxabs_C", "q1_wall_rmse_C")
+    q1_rbf = evaluate.q1_metrics(theta_rbf, ref, obs, known)
+    q1_pinn = evaluate.q1_metrics(theta_pinn, ref, obs, known)
+    bf_pinn = evaluate.bi_and_flux_metrics(bi_pinn, flows_pinn, bi_true, flows_true)
+    rows = [
+        evaluate.metrics_row(exp_id="E3", method="RBF_tps", data_file=data_file, status="completed",
+                             n_unknown=0, wall_time_s=rbf_time, **{k: q1_rbf[k] for k in q1_cols},
+                             notes="Q1 only; smoothing=0 (no noise-specific tuning)"),
+        evaluate.metrics_row(exp_id="E3", method=f"PINN_inverse_{E3_CONFIG}", data_file=data_file, seed=seed,
+                             status=status["status"], n_unknown=3, wall_time_s=status.get("wall_time_s"),
+                             **bf_pinn, **{k: q1_pinn[k] for k in q1_cols},
+                             notes=f"config {E3_CONFIG} fixed from E2, not tuned on these data; flux = PINN Robin flux"),
+    ]
+    summary = {
+        "exp_id": "E3", "run": run, "data_file": data_file, "environment": environment(),
+        "torch": torch.__version__, "pinn_config": E3_CONFIG, "experiment": exp,
+        "note": "Fixed-config evaluation (E2 config C1); simplified 2D model, synthetic data, single seed.",
+        "noise_sigma_C": sigma_C,
+        "rbf": {"q1": q1_rbf, "wall_time_s": rbf_time},
+        "pinn": {"train_status": status, "bi_hat": bi_pinn, "q1": q1_pinn, "metrics": bf_pinn,
+                 "heat_flows": flows_pinn, "sensor_rms_C": float(dT_rms(model, obs, known))},
+        "truth": {"Bi": bi_true, "heat_flows_201": flows_true},
+    }
+    fields = {"RBF (thin-plate)": theta_rbf}
+    flows_plot = {"Truth (201 grid)": flows_true}
+    if fd_ok:
+        q1_fd = evaluate.q1_metrics(theta_fd, ref, obs, known)
+        bf_fd = evaluate.bi_and_flux_metrics(fit["Bi"], flows_fd, bi_true, flows_true)
+        rows.append(evaluate.metrics_row(
+            exp_id="E3", method="FD_inverse", data_file=data_file, status="completed", n_unknown=3,
+            wall_time_s=fit["wall_time_s"], **bf_fd, **{k: q1_fd[k] for k in q1_cols},
+            notes=f"101x81 grid, {fit['n_converged']}/{len(fit['runs'])} starts converged"))
+        rel_err = {w: bf_fd[f"bi_{w}_relerr"] for w in common.ROBIN_WALLS}
+        if "rel_std_bi" in unc:
+            unc["relerr_over_std"] = {w: rel_err[w] / unc["rel_std_bi"][w] for w in common.ROBIN_WALLS}
+        summary["fd_inverse"] = {**{k: v for k, v in fit.items() if k != "runs"}, "q1": q1_fd,
+                                 "heat_flows": flows_fd, "metrics": bf_fd, "local_uncertainty": unc}
+        fields["FD-inverse"] = theta_fd
+        flows_plot["FD-inverse (101)"] = flows_fd
+    else:
+        rows.append(evaluate.metrics_row(exp_id="E3", method="FD_inverse", data_file=data_file,
+                                         status="failed", n_unknown=3, wall_time_s=fit["wall_time_s"],
+                                         notes=f"FD-inverse {fit.get('reason')}"))
+        summary["fd_inverse"] = {k: v for k, v in fit.items() if k != "runs"}
+    fields[f"PINN ({E3_CONFIG})"] = theta_pinn
+    flows_plot[f"PINN ({E3_CONFIG})"] = flows_pinn
+    write_metrics(rows)
+    summary["status"] = "completed" if (status["status"] == "completed" and fd_ok) else "failed"
+    _write_summary(out_dir, summary)
+    (out_dir / "history.json").write_text(json.dumps(common.to_jsonable(history), indent=1))
+    plot_e3(ref, fields, obs, flows_plot, known, fig_dir, run, sigma_C)
+    return summary
+
+
 def dT_rms(model, obs, known):
     import torch
     with torch.no_grad():
@@ -508,15 +697,23 @@ def dT_rms(model, obs, known):
     return common.dt_K(known) * np.sqrt(np.mean((pred - obs.theta) ** 2))
 
 
+# Each experiment's own default data set (E3 is the noisy fixed-config test).
+DEFAULT_DATA = {"E0": "A_clean", "E2": "A_clean", "E3": "A_noisy"}
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--exp", required=True, choices=["E0", "E1", "E2"])
-    p.add_argument("--data", default="A_clean")
+    p.add_argument("--exp", required=True, choices=["E0", "E1", "E2", "E3"])
+    p.add_argument("--data", default=None,
+                   help="sensor data name; default per experiment: " +
+                        ", ".join(f"{k}={v}" for k, v in DEFAULT_DATA.items()))
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--config", default="base", choices=sorted(E2_CONFIGS), help="E2 config")
     p.add_argument("--overwrite", action="store_true",
                    help="replace an existing run's results (refused by default)")
     args = p.parse_args(argv)
+    if args.data is None:
+        args.data = DEFAULT_DATA.get(args.exp)
     try:
         _dispatch(args)
     except RunExistsError as exc:
@@ -525,6 +722,18 @@ def main(argv=None):
 
 
 def _dispatch(args):
+    if args.exp == "E3":
+        s = run_e3(args.data, args.seed, args.overwrite)
+        fdi = s["fd_inverse"]
+        print(json.dumps(common.to_jsonable({
+            "status": s["status"], "pinn_train_status": s["pinn"]["train_status"],
+            "pinn_bi": s["pinn"]["bi_hat"], "pinn_metrics": s["pinn"]["metrics"], "pinn_q1": s["pinn"]["q1"],
+            "pinn_sensor_rms_C": s["pinn"]["sensor_rms_C"],
+            "fd_bi": fdi.get("Bi"), "fd_metrics": fdi.get("metrics"), "fd_q1": fdi.get("q1"),
+            "fd_sensor_rms_C": fdi.get("sensor_rms_C"), "fd_local_uncertainty": fdi.get("local_uncertainty"),
+            "rbf_q1": s["rbf"]["q1"],
+        }), indent=2))
+        sys.exit(0 if s["status"] == "completed" else 2)
     if args.exp == "E2":
         s = run_e2(args.data, args.seed, args.config, args.overwrite)
         print(json.dumps(common.to_jsonable({

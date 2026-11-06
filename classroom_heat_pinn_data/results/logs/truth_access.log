@@ -13,3 +13,6 @@
 2026-11-06T23:16:28+09:00	config.json	E2 evaluation: true Bi and heat flows
 2026-11-06T23:38:13+09:00	reference.npz	E2 evaluation: Q1 metrics (sensors_A_clean.csv)
 2026-11-06T23:38:13+09:00	config.json	E2 evaluation: true Bi and heat flows
+2026-11-07T00:59:25+09:00	reference.npz	E3 evaluation: Q1 metrics (sensors_A_noisy.csv)
+2026-11-07T00:59:25+09:00	config.json	E3 evaluation: true Bi and heat flows
+2026-11-07T01:00:25+09:00	reference.npz	E3 figure regeneration (sensor markers removed from bar panel)
