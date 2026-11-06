@@ -1,0 +1,136 @@
+{
+  "exp_id": "E1",
+  "run": "forward_seed0",
+  "status": "completed",
+  "environment": {
+    "python": "3.12.13",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "platform": "macOS-27.0.1-arm64-arm-64bit",
+    "machine": "arm64"
+  },
+  "torch": "2.13.0",
+  "note": "Diagnostic forward solve with the TRUE Bi fixed (truth used as input). Not an inverse result; E2 starts from a fresh network with beta = 0.",
+  "experiment": {
+    "seed": 0,
+    "hidden": 64,
+    "depth": 4,
+    "n_interior": 1000,
+    "n_wall": 100,
+    "heater_frac": 0.3,
+    "lr_net": 0.001,
+    "lr_beta": 0.003,
+    "adam_steps": 5000,
+    "resample_every": 500,
+    "lbfgs_iters": 100,
+    "lambda_pde": 1.0,
+    "lambda_bc": 1.0,
+    "lambda_data": 0.0,
+    "log_every": 100,
+    "time_budget_s": null,
+    "threads": null
+  },
+  "train_status": {
+    "status": "completed",
+    "stage": "adam",
+    "reason": null,
+    "adam_steps_done": 5000,
+    "wall_time_s": 84.74297650001245,
+    "device": "cpu",
+    "threads": 8,
+    "dtype": "torch.float64"
+  },
+  "targets": {
+    "rel_l2_max": 0.02,
+    "energy_relerr_max": 0.01
+  },
+  "targets_met": {
+    "rel_l2": true,
+    "energy": true
+  },
+  "field": {
+    "rel_l2": 0.0021910974815283588,
+    "rmse_C": 0.04236530888147935,
+    "maxabs_C": 0.17232094522932506,
+    "wall_rmse_C": 0.05079511246522422,
+    "n_eval_points": 32361
+  },
+  "heat_flows": {
+    "flux": {
+      "S": 0.6871270785722017,
+      "N": 0.0983127533843072,
+      "E": 0.22620616992758832
+    },
+    "flux_grad": {
+      "S": 0.6859643755916307,
+      "N": 0.09691233516932304,
+      "W": -0.0006270857001147573,
+      "E": 0.22782737437439915
+    },
+    "source_integral": 1.0099140279053553,
+    "share_signed": {
+      "S": 0.6803817548681442,
+      "N": 0.09734764610430843,
+      "E": 0.22398557072898423
+    },
+    "share_outflow": {
+      "S": 0.6792169170762213,
+      "N": 0.09718098346774344,
+      "E": 0.22360209945603526
+    },
+    "inflow": {
+      "S": 0.0,
+      "N": 0.0,
+      "E": 0.0
+    },
+    "energy_balance_relerr": 0.0017149717014368678,
+    "gradient_balance_relerr": 0.0001613716864798649,
+    "ranking": [
+      "S",
+      "E",
+      "N"
+    ]
+  },
+  "share_err_pp": {
+    "S": 0.10566492478853995,
+    "E": 0.0014543075604223077,
+    "N": 0.06437793781982892
+  },
+  "truth": {
+    "Bi": {
+      "S": 1.0,
+      "E": 0.4,
+      "N": 0.25
+    },
+    "heat_flows_201": {
+      "flux": {
+        "S": 0.6860369960460582,
+        "E": 0.22618391362465676,
+        "N": 0.09765932347553224
+      },
+      "source_integral": 1.0098802331465007,
+      "share_signed": {
+        "S": 0.6793251056202588,
+        "E": 0.22397102765338,
+        "N": 0.09670386672611014
+      },
+      "share_outflow": {
+        "S": 0.6793251056204294,
+        "E": 0.22397102765343627,
+        "N": 0.09670386672613443
+      },
+      "inflow": {
+        "S": 0.0,
+        "E": 0.0,
+        "N": 0.0
+      },
+      "energy_balance_relerr": 2.5109407086255973e-13,
+      "ranking": [
+        "S",
+        "E",
+        "N"
+      ]
+    }
+  },
+  "n_parameters": 12737
+}

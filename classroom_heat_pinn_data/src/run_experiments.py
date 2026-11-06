@@ -1,9 +1,11 @@
 """Experiment entry point.
 
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E0
+    cd classroom_heat_pinn_data && python -m src.run_experiments --exp E1 --seed 0
 
 Fitting (RBF, FD-inverse) receives only known.json and sensor observations.
 Truth is loaded afterwards through evaluate.py and every access is logged.
+E1 is the exception: a diagnostic that fixes the true Bi in a forward PINN.
 """
 import argparse
 import csv
@@ -238,11 +240,129 @@ def run_e0(data_name="A_clean"):
     return summary
 
 
+# E1 is a tool diagnostic: true Bi fixed, no sensor data, independent of any inverse run.
+E1_EXPERIMENT = {"seed": 0, "adam_steps": 5000, "lbfgs_iters": 100, "lambda_data": 0.0}
+E1_TARGETS = {"rel_l2_max": 0.02, "energy_relerr_max": 0.01}
+
+
+def plot_e1(ref, theta_hat, history, known, fig_path, title):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    dT = common.dt_K(known)
+    extent = [0, known["domain"]["LX"], 0, known["domain"]["LY"]]
+    T_ref, T_hat = dT * ref["theta"], dT * theta_hat
+    vmin, vmax = np.percentile(T_ref, [0.5, 99.5])
+    E = T_hat - T_ref
+    elim = np.abs(E).max()
+    fig, axes = plt.subplots(1, 4, figsize=(18, 3.8), constrained_layout=True)
+    for ax, (t, T) in zip(axes[:2], (("Reference (synthetic truth)", T_ref), ("PINN forward (true Bi fixed)", T_hat))):
+        im = ax.imshow(T.T, origin="lower", extent=extent, vmin=vmin, vmax=vmax, cmap="inferno")
+        ax.set_title(t)
+    fig.colorbar(im, ax=axes[:2], label="T [°C]")
+    im2 = axes[2].imshow(E.T, origin="lower", extent=extent, vmin=-elim, vmax=elim, cmap="RdBu_r")
+    axes[2].set_title("PINN − reference")
+    fig.colorbar(im2, ax=axes[2], label="ΔT [°C]")
+    steps = [h["step"] for h in history]
+    for key in ("loss", "pde", "bc"):
+        axes[3].semilogy(steps, [h[key] for h in history], label=key)
+    axes[3].set_xlabel("step"); axes[3].set_title("Training loss (raw MSE)"); axes[3].legend()
+    fig.suptitle(title + " — simplified 2D model, synthetic data, diagnostic")
+    fig.savefig(fig_path, dpi=130)
+    plt.close(fig)
+
+
+def run_e1(seed=0):
+    """Forward PINN with the true Bi fixed. Diagnostic only: truth is an input here."""
+    import torch
+    try:
+        from . import pinn
+    except ImportError:
+        import src.pinn as pinn
+
+    known = common.load_known()
+    run = f"forward_seed{seed}"
+    out_dir = common.RESULTS_DIR / "e1" / run
+    fig_dir = common.RESULTS_DIR / "figures"
+    for d in (out_dir, fig_dir):
+        d.mkdir(parents=True, exist_ok=True)
+    exp = {**pinn.DEFAULT_EXPERIMENT, **E1_EXPERIMENT, "seed": seed}
+
+    bi_true = evaluate.load_truth_bi("E1 forward diagnostic: true Bi fixed in the PINN (input)")
+    torch.manual_seed(seed)
+    model = pinn.HeatPINN(known, hidden=exp["hidden"], depth=exp["depth"], bi_fixed=bi_true)
+    history, status = pinn.train(model, known, exp, obs=None)
+    pinn.save_checkpoint(out_dir / "checkpoint.pt", model, exp, history, status,
+                         extra={"exp_id": "E1", "bi_fixed_from": "config.json Bi_true (diagnostic)"})
+
+    ref = evaluate.load_reference("E1 evaluation: forward field accuracy")
+    theta_hat = pinn.predict_grid(model, ref["x"], ref["y"])
+    dT = common.dt_K(known)
+    err = theta_hat - ref["theta"]
+    X, Y = np.meshgrid(ref["x"], ref["y"], indexing="ij")
+    LX, LY = known["domain"]["LX"], known["domain"]["LY"]
+    band = np.minimum.reduce([X, LX - X, Y, LY - Y]) <= evaluate.WALL_BAND
+    field = {
+        "rel_l2": float(np.linalg.norm(err) / np.linalg.norm(ref["theta"])),
+        "rmse_C": float(dT * np.sqrt(np.mean(err ** 2))),
+        "maxabs_C": float(dT * np.abs(err).max()),
+        "wall_rmse_C": float(dT * np.sqrt(np.mean(err[band] ** 2))),
+        "n_eval_points": int(err.size),
+    }
+    flows = pinn.heat_flows(model, known)
+    _, flows_true = evaluate.true_heat_flows(known, "E1 evaluation: true heat flows")
+    share_err = {w: 100 * (flows["share_signed"][w] - flows_true["share_signed"][w]) for w in common.ROBIN_WALLS}
+    targets_met = {
+        "rel_l2": field["rel_l2"] <= E1_TARGETS["rel_l2_max"],
+        "energy": flows["energy_balance_relerr"] <= E1_TARGETS["energy_relerr_max"],
+    }
+
+    row = evaluate.metrics_row(
+        exp_id="E1", method="PINN_forward", data_file="none", seed=seed, status=status["status"],
+        n_unknown=0, **{f"flux_{w}": flows["flux"][w] for w in common.ROBIN_WALLS},
+        source_integral=flows["source_integral"],
+        **{f"share_{w}_err_pp": share_err[w] for w in common.ROBIN_WALLS},
+        ranking_correct=flows["ranking"] == flows_true["ranking"],
+        q1_rmse_C=field["rmse_C"], q1_maxabs_C=field["maxabs_C"], q1_wall_rmse_C=field["wall_rmse_C"],
+        energy_balance_relerr=flows["energy_balance_relerr"], wall_time_s=status.get("wall_time_s"),
+        notes=f"diagnostic: true Bi fixed, no sensor data; q1_* over the full 201x161 grid; "
+              f"rel_L2={field['rel_l2']:.4g}; Adam {status.get('adam_steps_done')} + L-BFGS {exp['lbfgs_iters']}")
+    write_metrics([row])
+
+    summary = {
+        "exp_id": "E1", "run": run, "status": status["status"], "environment": environment(),
+        "torch": torch.__version__,
+        "note": "Diagnostic forward solve with the TRUE Bi fixed (truth used as input). "
+                "Not an inverse result; E2 starts from a fresh network with beta = 0.",
+        "experiment": exp, "train_status": status, "targets": E1_TARGETS, "targets_met": targets_met,
+        "field": field, "heat_flows": flows, "share_err_pp": share_err,
+        "truth": {"Bi": bi_true, "heat_flows_201": flows_true},
+        "n_parameters": pinn.count_parameters(model),
+    }
+    _write_summary(out_dir, summary)
+    (out_dir / "history.json").write_text(json.dumps(common.to_jsonable(history), indent=1))
+    plot_e1(ref, theta_hat, history, known, fig_dir / f"e1_{run}.png", f"E1 {run}")
+    return summary
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--exp", required=True, choices=["E0"])
+    p.add_argument("--exp", required=True, choices=["E0", "E1"])
     p.add_argument("--data", default="A_clean")
+    p.add_argument("--seed", type=int, default=0)
     args = p.parse_args(argv)
+    if args.exp == "E1":
+        s = run_e1(args.seed)
+        print(json.dumps(common.to_jsonable({
+            "status": s["status"], "train_status": s["train_status"], "field": s["field"],
+            "targets_met": s["targets_met"],
+            "energy_balance_relerr": s["heat_flows"]["energy_balance_relerr"],
+            "gradient_balance_relerr": s["heat_flows"]["gradient_balance_relerr"],
+            "flux": s["heat_flows"]["flux"], "flux_grad": s["heat_flows"]["flux_grad"],
+            "share_err_pp": s["share_err_pp"],
+        }), indent=2))
+        sys.exit(0 if s["status"] == "completed" else 2)
     if args.exp == "E0":
         s = run_e0(args.data)
         if s["status"] != "completed":

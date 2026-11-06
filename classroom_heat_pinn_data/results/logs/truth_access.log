@@ -6,3 +6,6 @@
 2026-11-06T22:35:34+09:00	reference.npz	E0 tool diagnostic (solver reproduction / orientation)
 2026-11-06T22:35:36+09:00	reference.npz	E0 evaluation: Q1 metrics
 2026-11-06T22:35:36+09:00	config.json	E0 evaluation: true Bi and heat flows
+2026-11-06T22:49:02+09:00	config.json	E1 forward diagnostic: true Bi fixed in the PINN (input)
+2026-11-06T22:50:28+09:00	reference.npz	E1 evaluation: forward field accuracy
+2026-11-06T22:50:28+09:00	config.json	E1 evaluation: true heat flows
