@@ -9,3 +9,7 @@
 2026-11-06T22:49:02+09:00	config.json	E1 forward diagnostic: true Bi fixed in the PINN (input)
 2026-11-06T22:50:28+09:00	reference.npz	E1 evaluation: forward field accuracy
 2026-11-06T22:50:28+09:00	config.json	E1 evaluation: true heat flows
+2026-11-06T23:16:28+09:00	reference.npz	E2 evaluation: Q1 metrics (sensors_A_clean.csv)
+2026-11-06T23:16:28+09:00	config.json	E2 evaluation: true Bi and heat flows
+2026-11-06T23:38:13+09:00	reference.npz	E2 evaluation: Q1 metrics (sensors_A_clean.csv)
+2026-11-06T23:38:13+09:00	config.json	E2 evaluation: true Bi and heat flows

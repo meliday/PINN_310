@@ -1,0 +1,203 @@
+{
+  "exp_id": "E2",
+  "run": "A_clean_seed0",
+  "data_file": "sensors_A_clean.csv",
+  "status": "completed",
+  "environment": {
+    "python": "3.12.13",
+    "numpy": "2.5.1",
+    "scipy": "1.18.0",
+    "platform": "macOS-27.0.1-arm64-arm-64bit",
+    "machine": "arm64"
+  },
+  "torch": "2.13.0",
+  "note": "Development result on sensors_A_clean (plan section 5): reported as-is, single seed.",
+  "experiment": {
+    "seed": 0,
+    "hidden": 64,
+    "depth": 4,
+    "n_interior": 1000,
+    "n_wall": 100,
+    "heater_frac": 0.3,
+    "lr_net": 0.001,
+    "lr_beta": 0.003,
+    "adam_steps": 5000,
+    "resample_every": 500,
+    "lbfgs_iters": 100,
+    "lambda_pde": 1.0,
+    "lambda_bc": 1.0,
+    "lambda_data": 1.0,
+    "log_every": 100,
+    "time_budget_s": null,
+    "threads": null
+  },
+  "train_status": {
+    "status": "completed",
+    "stage": "lbfgs",
+    "reason": null,
+    "adam_steps_done": 5000,
+    "lbfgs": "completed",
+    "wall_time_s": 86.35121658298885,
+    "device": "cpu",
+    "threads": 8,
+    "dtype": "torch.float64"
+  },
+  "targets": {
+    "bi_relerr_max": 0.05,
+    "q1_rmse_C_max": 0.2,
+    "share_err_pp_max": 2.0
+  },
+  "targets_met": {
+    "bi": false,
+    "q1_rmse": true,
+    "share": false
+  },
+  "bi_hat": {
+    "S": 0.9691139075928779,
+    "E": 0.38970327932563487,
+    "N": 0.3186028353642262
+  },
+  "q1": {
+    "q1_rmse_C": 0.07917904828354339,
+    "q1_maxabs_C": 0.26408474476918187,
+    "q1_wall_rmse_C": 0.10656144456019304,
+    "q1_rmse_in_hull_C": 0.05893196608261903,
+    "q1_rmse_out_hull_C": 0.09637628997008843,
+    "frac_out_hull": 0.4808506692219715,
+    "n_eval_points": 32351
+  },
+  "metrics": {
+    "bi_S_hat": 0.9691139075928779,
+    "bi_S_relerr": -0.030886092407122145,
+    "flux_S": 0.6704600613457616,
+    "share_S_err_pp": -1.5446752790215568,
+    "bi_E_hat": 0.38970327932563487,
+    "bi_E_relerr": -0.02574180168591289,
+    "flux_E": 0.22090429381074422,
+    "share_E_err_pp": -0.5235286088409508,
+    "bi_N_hat": 0.3186028353642262,
+    "bi_N_relerr": 0.2744113414569047,
+    "flux_N": 0.12238572347755737,
+    "share_N_err_pp": 2.4480432229906355,
+    "source_integral": 1.0099140279053553,
+    "ranking_correct": true,
+    "energy_balance_relerr": 0.003798393351030222
+  },
+  "heat_flows_pinn": {
+    "flux": {
+      "S": 0.6704600613457616,
+      "N": 0.12238572347755737,
+      "E": 0.22090429381074422
+    },
+    "flux_grad": {
+      "S": 0.6699476458925991,
+      "N": 0.11808025142218903,
+      "W": -0.0013703851860481255,
+      "E": 0.2233162150185371
+    },
+    "source_integral": 1.0099140279053553,
+    "share_signed": {
+      "S": 0.6638783528300433,
+      "N": 0.1211842989560165,
+      "E": 0.2187357415649705
+    },
+    "share_outflow": {
+      "S": 0.6613662237631055,
+      "N": 0.12072573512641409,
+      "E": 0.21790804111048045
+    },
+    "inflow": {
+      "S": 0.0,
+      "N": 0.0,
+      "E": 0.0
+    },
+    "energy_balance_relerr": 0.003798393351030222,
+    "gradient_balance_relerr": 5.911319208581563e-05,
+    "ranking": [
+      "S",
+      "E",
+      "N"
+    ]
+  },
+  "heat_flows_fd_with_pinn_bi": {
+    "flux": {
+      "S": 0.6687024939445139,
+      "E": 0.22049041705147424,
+      "N": 0.12068732215038688
+    },
+    "source_integral": 1.0098802331465007,
+    "share_signed": {
+      "S": 0.6621601968196034,
+      "E": 0.21833323379792133,
+      "N": 0.1195065693823508
+    },
+    "share_outflow": {
+      "S": 0.6621601968196859,
+      "E": 0.2183332337979485,
+      "N": 0.11950656938236567
+    },
+    "inflow": {
+      "S": 0.0,
+      "E": 0.0,
+      "N": 0.0
+    },
+    "energy_balance_relerr": 1.2444767435044553e-13,
+    "ranking": [
+      "S",
+      "E",
+      "N"
+    ]
+  },
+  "share_err_pp_fd_with_pinn_bi": {
+    "S": -1.7164908800655465,
+    "E": -0.5637793855458678,
+    "N": 2.280270265624065
+  },
+  "sensor_rms_C": 0.08517095502983801,
+  "independence": {
+    "e2_init_beta": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "e2_init_state_sha256": "f6aaa2598104653ce45e5f0b806a5b1da9d064c961902b302b6d177ceee17519",
+    "max_abs_diff_e2_init_vs_e1_trained_net": 0.2460974884546936,
+    "note": "E2 starts from a fresh network (same init seed as E1's untrained network) with beta = 0; E1 trained weights are not loaded."
+  },
+  "truth": {
+    "Bi": {
+      "S": 1.0,
+      "E": 0.4,
+      "N": 0.25
+    },
+    "heat_flows_201": {
+      "flux": {
+        "S": 0.6860369960460582,
+        "E": 0.22618391362465676,
+        "N": 0.09765932347553224
+      },
+      "source_integral": 1.0098802331465007,
+      "share_signed": {
+        "S": 0.6793251056202588,
+        "E": 0.22397102765338,
+        "N": 0.09670386672611014
+      },
+      "share_outflow": {
+        "S": 0.6793251056204294,
+        "E": 0.22397102765343627,
+        "N": 0.09670386672613443
+      },
+      "inflow": {
+        "S": 0.0,
+        "E": 0.0,
+        "N": 0.0
+      },
+      "energy_balance_relerr": 2.5109407086255973e-13,
+      "ranking": [
+        "S",
+        "E",
+        "N"
+      ]
+    }
+  }
+}

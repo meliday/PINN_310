@@ -2,6 +2,8 @@
 
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E0
     cd classroom_heat_pinn_data && python -m src.run_experiments --exp E1 --seed 0
+    cd classroom_heat_pinn_data && python -m src.run_experiments --exp E2 --data A_clean --seed 0
+    cd classroom_heat_pinn_data && python -m src.run_experiments --exp E2 --data A_clean --seed 0 --config C1
 
 Fitting (RBF, FD-inverse) receives only known.json and sensor observations.
 Truth is loaded afterwards through evaluate.py and every access is logged.
@@ -346,12 +348,170 @@ def run_e1(seed=0):
     return summary
 
 
+# E2 uses plan defaults (section 8) fixed before the run; the final state after the fixed
+# budget is reported (no checkpoint selection against the reference).
+E2_EXPERIMENT = {"seed": 0, "adam_steps": 5000, "lbfgs_iters": 100, "lambda_data": 1.0}
+# Development tuning (TURN-021): one variable changed from E2_EXPERIMENT, chosen by
+# training-only criteria (sensor RMS, Bi drift) declared before screening.
+E2_CONFIGS = {
+    "base": {},
+    "C1": {"adam_steps": 20000},
+}
+E2_TARGETS = {"bi_relerr_max": 0.05, "q1_rmse_C_max": 0.2, "share_err_pp_max": 2.0}
+
+
+def _state_digest(model):
+    import hashlib
+    h = hashlib.sha256()
+    for k, v in sorted(model.state_dict().items()):
+        h.update(k.encode()); h.update(v.detach().numpy().tobytes())
+    return h.hexdigest()
+
+
+def plot_e2(ref, theta_hat, obs, history, bi_true, known, fig_path, title):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    dT = common.dt_K(known)
+    extent = [0, known["domain"]["LX"], 0, known["domain"]["LY"]]
+    T_ref, T_hat = dT * ref["theta"], dT * theta_hat
+    vmin, vmax = np.percentile(T_ref, [0.5, 99.5])
+    E = T_hat - T_ref
+    elim = np.abs(E).max()
+    fig, axes = plt.subplots(1, 4, figsize=(19, 3.9), constrained_layout=True)
+    for ax, (t, T) in zip(axes[:2], (("Reference (synthetic truth)", T_ref), ("Inverse PINN (A_clean)", T_hat))):
+        im = ax.imshow(T.T, origin="lower", extent=extent, vmin=vmin, vmax=vmax, cmap="inferno")
+        ax.set_title(t)
+    fig.colorbar(im, ax=axes[:2], label="T [°C]")
+    im2 = axes[2].imshow(E.T, origin="lower", extent=extent, vmin=-elim, vmax=elim, cmap="RdBu_r")
+    axes[2].set_title("PINN − reference")
+    fig.colorbar(im2, ax=axes[2], label="ΔT [°C]")
+    for ax in axes[:3]:
+        ax.plot(obs.xy[:, 0], obs.xy[:, 1], "o", mfc="none", mec="cyan", ms=6)
+    steps = [h["step"] for h in history]
+    for i, w in enumerate(common.ROBIN_WALLS):
+        c = f"C{i}"
+        axes[3].plot(steps, [h["Bi"][w] for h in history], color=c, label=f"Bi_{w}")
+        axes[3].axhline(bi_true[w], color=c, ls="--", lw=0.8)
+    axes[3].set_yscale("log"); axes[3].set_xlabel("step")
+    axes[3].set_title("Bi trajectory (dashed: truth)"); axes[3].legend()
+    fig.suptitle(title + " — simplified 2D model, synthetic data, single seed (development)")
+    fig.savefig(fig_path, dpi=130)
+    plt.close(fig)
+
+
+def run_e2(data_name="A_clean", seed=0, config="base"):
+    """Inverse PINN: fresh network, beta = 0, observations + known only during training.
+
+    config 'base' keeps the original run name and metrics method; others get a tag so
+    earlier runs are never overwritten.
+    """
+    import torch
+    try:
+        from . import pinn
+    except ImportError:
+        import src.pinn as pinn
+
+    known = common.load_known()
+    obs = common.load_observations(data_name, known)
+    data_file = f"sensors_{data_name}.csv"
+    tag = "" if config == "base" else f"_{config}"
+    run = f"{data_name}{tag}_seed{seed}"
+    method = f"PINN_inverse{tag}"
+    out_dir = common.RESULTS_DIR / "e2" / run
+    fig_dir = common.RESULTS_DIR / "figures"
+    for d in (out_dir, fig_dir):
+        d.mkdir(parents=True, exist_ok=True)
+    exp = {**pinn.DEFAULT_EXPERIMENT, **E2_EXPERIMENT, **E2_CONFIGS[config], "seed": seed}
+
+    # ---- training: no truth file is opened in this block
+    torch.manual_seed(seed)
+    model = pinn.HeatPINN(known, hidden=exp["hidden"], depth=exp["depth"])
+    init = {"beta": model.beta.detach().tolist(), "state_sha256": _state_digest(model)}
+    history, status = pinn.train(model, known, exp, obs=obs)
+    pinn.save_checkpoint(out_dir / "checkpoint.pt", model, exp, history, status,
+                         extra={"exp_id": "E2", "data_file": data_file, "init": init})
+    bi_hat = dict(zip(common.ROBIN_WALLS, model.bi().detach().tolist()))
+    flows_pinn = pinn.heat_flows(model, known)
+    # Estimated Bi in the FD solver: a separately named quantity (not the PINN field).
+    _, _, _, info_fd = fd.solve_field(bi_hat, known, nx=fd.FINE_NX)
+    flows_fd_with_pinn_bi = fd.heat_flows(info_fd)
+
+    # ---- evaluation (truth access logged)
+    ref = evaluate.load_reference(f"E2 evaluation: Q1 metrics ({data_file})")
+    theta_hat = pinn.predict_grid(model, ref["x"], ref["y"])
+    q1 = evaluate.q1_metrics(theta_hat, ref, obs, known)
+    bi_true, flows_true = evaluate.true_heat_flows(known, "E2 evaluation: true Bi and heat flows")
+    bf = evaluate.bi_and_flux_metrics(bi_hat, flows_pinn, bi_true, flows_true)
+    share_err_fd = {w: 100 * (flows_fd_with_pinn_bi["share_signed"][w] - flows_true["share_signed"][w])
+                    for w in common.ROBIN_WALLS}
+    e1_ckpt = common.RESULTS_DIR / "e1" / f"forward_seed{seed}" / "checkpoint.pt"
+    independence = {"e2_init_beta": init["beta"], "e2_init_state_sha256": init["state_sha256"]}
+    if e1_ckpt.exists():
+        e1_state = torch.load(e1_ckpt, weights_only=False)["state_dict"]
+        torch.manual_seed(seed)
+        fresh = pinn.HeatPINN(known, hidden=exp["hidden"], depth=exp["depth"])
+        independence["max_abs_diff_e2_init_vs_e1_trained_net"] = max(
+            float((e1_state[k] - v).abs().max()) for k, v in fresh.state_dict().items() if k.startswith("net."))
+        independence["note"] = ("E2 starts from a fresh network (same init seed as E1's untrained network) "
+                                "with beta = 0; E1 trained weights are not loaded.")
+    targets_met = {
+        "bi": all(abs(bf[f"bi_{w}_relerr"]) <= E2_TARGETS["bi_relerr_max"] for w in common.ROBIN_WALLS),
+        "q1_rmse": q1["q1_rmse_C"] <= E2_TARGETS["q1_rmse_C_max"],
+        "share": all(abs(bf[f"share_{w}_err_pp"]) <= E2_TARGETS["share_err_pp_max"] for w in common.ROBIN_WALLS),
+    }
+
+    row = evaluate.metrics_row(
+        exp_id="E2", method=method, data_file=data_file, seed=seed, status=status["status"],
+        n_unknown=3, wall_time_s=status.get("wall_time_s"), **bf,
+        **{k: q1[k] for k in ("q1_rmse_C", "q1_maxabs_C", "q1_wall_rmse_C")},
+        notes=(f"development run, config {config} {E2_CONFIGS[config] or '(plan defaults)'}; "
+               f"flux = PINN Robin flux; Adam {status.get('adam_steps_done')} + L-BFGS {status.get('lbfgs')}; "
+               "final state, no selection"))
+    write_metrics([row])
+
+    summary = {
+        "exp_id": "E2", "run": run, "config": config, "config_change": E2_CONFIGS[config],
+        "data_file": data_file, "status": status["status"],
+        "environment": environment(), "torch": torch.__version__,
+        "note": "Development result on sensors_A_clean (plan section 5): reported as-is, single seed.",
+        "experiment": exp, "train_status": status, "targets": E2_TARGETS, "targets_met": targets_met,
+        "bi_hat": bi_hat, "q1": q1, "metrics": bf, "heat_flows_pinn": flows_pinn,
+        "heat_flows_fd_with_pinn_bi": flows_fd_with_pinn_bi, "share_err_pp_fd_with_pinn_bi": share_err_fd,
+        "sensor_rms_C": float(dT_rms(model, obs, known)), "independence": independence,
+        "truth": {"Bi": bi_true, "heat_flows_201": flows_true},
+    }
+    _write_summary(out_dir, summary)
+    (out_dir / "history.json").write_text(json.dumps(common.to_jsonable(history), indent=1))
+    plot_e2(ref, theta_hat, obs, history, bi_true, known, fig_dir / f"e2_{run}.png", f"E2 {run}")
+    return summary
+
+
+def dT_rms(model, obs, known):
+    import torch
+    with torch.no_grad():
+        pred = model(torch.tensor(obs.xy, dtype=torch.float64)).numpy()
+    return common.dt_K(known) * np.sqrt(np.mean((pred - obs.theta) ** 2))
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--exp", required=True, choices=["E0", "E1"])
+    p.add_argument("--exp", required=True, choices=["E0", "E1", "E2"])
     p.add_argument("--data", default="A_clean")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--config", default="base", choices=sorted(E2_CONFIGS), help="E2 config")
     args = p.parse_args(argv)
+    if args.exp == "E2":
+        s = run_e2(args.data, args.seed, args.config)
+        print(json.dumps(common.to_jsonable({
+            "status": s["status"], "train_status": s["train_status"], "bi_hat": s["bi_hat"],
+            "targets_met": s["targets_met"], "metrics": s["metrics"], "q1": s["q1"],
+            "share_err_pp_fd_with_pinn_bi": s["share_err_pp_fd_with_pinn_bi"],
+            "gradient_balance_relerr": s["heat_flows_pinn"]["gradient_balance_relerr"],
+            "sensor_rms_C": s["sensor_rms_C"], "independence": s["independence"],
+        }), indent=2))
+        sys.exit(0 if s["status"] == "completed" else 2)
     if args.exp == "E1":
         s = run_e1(args.seed)
         print(json.dumps(common.to_jsonable({
