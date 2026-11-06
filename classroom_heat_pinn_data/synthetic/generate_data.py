@@ -1,0 +1,160 @@
+"""Generate the synthetic classroom datasets.
+
+Outputs (in ./data):
+  config.json                  ground truth + generation settings (generation / evaluation code only)
+  known.json                   what the estimation methods are allowed to know (no Bi!)
+  reference.npz                true field, fine grid 201x161
+  whatif_reference.npz         true field with the heater moved
+  mismatch_reference.npz       true field from a richer model (variable k + window draft)
+  sensors_{A,B}_{clean,noisy}.csv
+  sensors_A_mismatch.csv       richer-model data + per-sensor offsets + noise
+  verification.json            solver checks (MMS order, energy balance, grid refinement)
+"""
+import json
+import os
+
+import numpy as np
+
+from solver import LX, LY, mms_test, solve
+
+OUT = "data"
+os.makedirs(OUT, exist_ok=True)
+
+# ------------------------------------------------------------------ settings
+T_OUT_C, DT = 0.0, 20.0            # theta = (T - T_out) / DT
+T_CORR_C = 14.0                     # corridor temperature
+THETA_INF = {"S": 0.0, "E": 0.0, "N": (T_CORR_C - T_OUT_C) / DT}
+BI_TRUE = {"S": 1.0, "E": 0.4, "N": 0.25}   # window wall, exterior wall, corridor wall
+HEATER = dict(x=0.2, y=0.6, A=8.65, s=0.15)
+HEATER_WHATIF = dict(HEATER, x=0.5, y=0.15)
+NX_FINE, NX_COARSE = 201, 101
+SENSOR_NOISE_C = 0.1
+SEED_NOISE, SEED_LAYOUT_B, SEED_MISMATCH = 7, 42, 11
+
+LAYOUT_A = np.array([(0.30, 0.04), (0.70, 0.04),     # near window wall
+                     (0.95, 0.25), (0.95, 0.55),     # near exterior wall
+                     (0.30, 0.76), (0.70, 0.76),     # near corridor wall
+                     (0.30, 0.40), (0.50, 0.25), (0.70, 0.40), (0.50, 0.55)])  # interior
+rngB = np.random.default_rng(SEED_LAYOUT_B)
+LAYOUT_B = np.round(np.column_stack([rngB.uniform(0.05, 0.95, 10), rngB.uniform(0.05, 0.75, 10)]), 2)
+
+# richer "reality" model for the mismatch experiment
+K_VAR = lambda X, Y: 1.0 + 0.25 * np.sin(2 * np.pi * X) * np.sin(np.pi * Y / LY)   # uneven mixing
+DRAFT = dict(x=0.75, y=0.03, s=0.05)        # cold draft at a leaky window frame (heat sink)
+DRAFT_FRACTION = 0.10                        # draft removes ~10% of the heater power
+OFFSET_C = 0.2                               # per-sensor calibration offset (std)
+
+
+def to_C(theta):
+    return T_OUT_C + DT * theta
+
+
+def on_grid_index(x, y, pts):
+    ix = np.rint(pts[:, 0] / (x[1] - x[0])).astype(int)
+    iy = np.rint(pts[:, 1] / (y[1] - y[0])).astype(int)
+    assert np.allclose(x[ix], pts[:, 0]) and np.allclose(y[iy], pts[:, 1]), "sensors must sit on grid nodes"
+    return ix, iy
+
+
+def write_sensors(path, pts, theta):
+    with open(path, "w") as f:
+        f.write("sensor_id,x,y,theta_obs,T_obs_C\n")
+        for i, ((px, py), t) in enumerate(zip(pts, theta)):
+            f.write(f"{i},{px:.2f},{py:.2f},{t:.6f},{to_C(t):.4f}\n")
+
+
+def loss_shares(info):
+    return {w: info["loss"][w] / info["q_in"] for w in "SEN"}
+
+
+# ------------------------------------------------------------------ 1. verification
+print("1) solver verification")
+hs, errs, orders = mms_test()
+x_c, y_c, T_c, info_c = solve(NX_COARSE, BI_TRUE, THETA_INF, heaters=[HEATER])
+x_f, y_f, T_f, info_f = solve(NX_FINE, BI_TRUE, THETA_INF, heaters=[HEATER])
+refine_diff_C = DT * np.abs(T_f[::2, ::2] - T_c).max()
+print(f"  energy balance rel. error (fine): {info_f['balance_rel_err']:.2e}")
+print(f"  grid refinement 101x81 vs 201x161: max diff {refine_diff_C:.4f} C")
+assert min(orders) > 1.9 and info_f["balance_rel_err"] < 1e-8 and refine_diff_C < 0.01
+verification = {"mms_h": hs, "mms_max_error": errs, "mms_observed_order": orders,
+                "energy_balance_rel_err": info_f["balance_rel_err"],
+                "refinement_max_diff_C": refine_diff_C}
+
+# ------------------------------------------------------------------ 2. reference + what-if
+print("2) reference fields")
+np.savez(f"{OUT}/reference.npz", x=x_f, y=y_f, theta=T_f, T_C=to_C(T_f), Q=info_f["Q"])
+_, _, T_w, info_w = solve(NX_FINE, BI_TRUE, THETA_INF, heaters=[HEATER_WHATIF])
+np.savez(f"{OUT}/whatif_reference.npz", x=x_f, y=y_f, theta=T_w, T_C=to_C(T_w), Q=info_w["Q"])
+C = to_C(T_f)
+print(f"  room temperature: p5 {np.percentile(C, 5):.1f}, median {np.median(C):.1f}, "
+      f"p95 {np.percentile(C, 95):.1f}, min {C.min():.1f}, max {C.max():.1f} C")
+print("  heat-loss shares (S window / E exterior / N corridor):",
+      {k: round(v, 3) for k, v in loss_shares(info_f).items()})
+print(f"  what-if (heater at window): coldest {to_C(T_w).min():.1f} C, median {np.median(to_C(T_w)):.1f} C")
+
+# ------------------------------------------------------------------ 3. sensors
+print("3) sensors")
+rng = np.random.default_rng(SEED_NOISE)
+noise_sd = SENSOR_NOISE_C / DT
+for name, pts in (("A", LAYOUT_A), ("B", LAYOUT_B)):
+    ix, iy = on_grid_index(x_f, y_f, pts)
+    clean = T_f[ix, iy]
+    write_sensors(f"{OUT}/sensors_{name}_clean.csv", pts, clean)
+    write_sensors(f"{OUT}/sensors_{name}_noisy.csv", pts, clean + rng.normal(0, noise_sd, len(pts)))
+
+# ------------------------------------------------------------------ 4. mismatch "reality"
+print("4) model-mismatch dataset")
+X, Y = np.meshgrid(x_f, y_f, indexing="ij")
+Q_heat = HEATER["A"] * np.exp(-((X - HEATER["x"]) ** 2 + (Y - HEATER["y"]) ** 2) / (2 * HEATER["s"] ** 2))
+draft_shape = np.exp(-((X - DRAFT["x"]) ** 2 + (Y - DRAFT["y"]) ** 2) / (2 * DRAFT["s"] ** 2))
+h = x_f[1] - x_f[0]
+wx = np.full(len(x_f), h); wx[[0, -1]] = h / 2
+wy = np.full(len(y_f), h); wy[[0, -1]] = h / 2
+vol = np.outer(wx, wy)
+B = DRAFT_FRACTION * (Q_heat * vol).sum() / (draft_shape * vol).sum()
+Q_mis = Q_heat - B * draft_shape
+_, _, T_m, info_m = solve(NX_FINE, BI_TRUE, THETA_INF, Q=Q_mis, k=K_VAR)
+np.savez(f"{OUT}/mismatch_reference.npz", x=x_f, y=y_f, theta=T_m, T_C=to_C(T_m), Q=Q_mis)
+rng_m = np.random.default_rng(SEED_MISMATCH)
+ix, iy = on_grid_index(x_f, y_f, LAYOUT_A)
+offsets = rng_m.normal(0, OFFSET_C / DT, len(LAYOUT_A))
+write_sensors(f"{OUT}/sensors_A_mismatch.csv", LAYOUT_A, T_m[ix, iy] + offsets + rng_m.normal(0, noise_sd, len(LAYOUT_A)))
+heat_in = float((Q_heat * vol).sum())
+mis_shares = {w: info_m["loss"][w] / heat_in for w in "SEN"}
+mis_shares["draft"] = DRAFT_FRACTION
+print(f"  mismatch field differs from simple model by up to {DT * np.abs(T_m - T_f).max():.2f} C "
+      f"(RMS {DT * np.sqrt(((T_m - T_f) ** 2).mean()):.2f} C)")
+print("  mismatch heat-loss shares (of heater power):", {k: round(v, 3) for k, v in mis_shares.items()})
+
+# ------------------------------------------------------------------ 5. config files
+config = {
+    "_note": "GROUND TRUTH. Read only by generate_data.py and evaluate.py, never by training code.",
+    "domain": {"LX": LX, "LY": LY, "L_m": 10.0},
+    "temperature_scaling": {"T_out_C": T_OUT_C, "DT_K": DT, "theta": "(T - T_out) / DT"},
+    "Bi_true": BI_TRUE,
+    "heat_loss_share_true": loss_shares(info_f),
+    "theta_inf": THETA_INF,
+    "heater": HEATER, "heater_whatif": HEATER_WHATIF,
+    "grids": {"reference_nx_ny": [NX_FINE, len(y_f)], "baseline_nx_ny": [NX_COARSE, len(y_c)]},
+    "sensors": {"layout_A": LAYOUT_A.tolist(), "layout_B": LAYOUT_B.tolist(),
+                "noise_std_C": SENSOR_NOISE_C, "seed_noise": SEED_NOISE, "seed_layout_B": SEED_LAYOUT_B},
+    "mismatch": {"k": "1 + 0.25 sin(2 pi x) sin(pi y / LY)", "draft": DRAFT, "draft_fraction": DRAFT_FRACTION,
+                 "draft_amplitude": float(B), "sensor_offset_std_C": OFFSET_C, "seed": SEED_MISMATCH,
+                 "heat_loss_share_true": mis_shares},
+}
+known = {
+    "_note": "What estimation methods may use. Bi values are unknown.",
+    "domain": {"LX": LX, "LY": LY, "L_m": 10.0},
+    "temperature_scaling": {"T_out_C": T_OUT_C, "DT_K": DT},
+    "walls": {"S": "window wall, Robin, theta_inf=0, Bi unknown",
+              "E": "exterior wall, Robin, theta_inf=0, Bi unknown",
+              "N": f"corridor wall, Robin, theta_inf={THETA_INF['N']}, Bi unknown",
+              "W": "neighbouring classroom, adiabatic"},
+    "theta_inf": THETA_INF,
+    "heater": HEATER, "heater_whatif": HEATER_WHATIF,
+    "k": 1.0,
+}
+for fname, obj in (("config.json", config), ("known.json", known), ("verification.json", verification)):
+    with open(f"{OUT}/{fname}", "w") as f:
+        json.dump(obj, f, indent=2)
+print("done ->", sorted(os.listdir(OUT)))

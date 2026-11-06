@@ -1,0 +1,5 @@
+REF offsets (C): min -0.10, max +0.09, spread std 0.07
+LAB2 Sample02: 2022-10-24 11:00:00 -> 2022-10-26 19:00:00, 20161 rows, invalid 0; room mean 23.71 C; hourly spatial spread (max-min) median 0.79 C, max 3.81 C; outdoor during period 18.4-28.6 C (coverage 100%)
+LAB2 Sample04: 2022-11-27 18:30:00 -> 2022-11-30 11:20:00, 23341 rows, invalid 0; room mean 23.77 C; hourly spatial spread (max-min) median 0.51 C, max 0.73 C; outdoor during period 17.4-26.0 C (coverage 100%)
+Intel: 2313682 raw rows -> 2303286 parsable; removed 519051 outliers (T outside 5-45 C or voltage < 2.3 V)
+Intel 30-min table: 1284 times x 52 motes; motes with >=80% coverage at 02-04h: 24; median night spatial spread 3.14 C
