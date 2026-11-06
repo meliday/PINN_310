@@ -26,6 +26,35 @@ Extensions requested during the project:
 - **X1** — an adiabatic internal wall (x ∈ [0, 6] m, y ∈ [3.0, 3.4] m) leaving a 4 m passage on the east side.
 - **X2** — four conditions on the same sensors: base / sink only / wall only / wall + sink.
 
+## How it works
+
+### Pipeline
+
+A generator solves the true model on a fine grid and splits its output into what the estimators may see (room geometry and sensor readings) and what only the evaluator may see (true coefficients and the full field). PINN, FD-inverse and RBF all fit from the same sensor file; the truth is read only after fitting, and every read is logged.
+
+### PINN
+
+One network predicts temperature everywhere. The physics is enforced softly through loss terms, and the unknown coefficients are trained alongside the network weights.
+
+- The network maps a point (x, y) to θ; derivatives come from autograd.
+- The loss sums three residuals: the PDE inside the room (−Δθ − Q), the wall conditions (∂θ/∂n + Bi (θ − θ∞)), and the misfit at the 10 sensors.
+- Adam (20000 steps) and then L-BFGS (100 iterations) update the weights together with log Bi (and log f when there is a sink).
+
+Collocation points are resampled every 500 steps: 1000 inside the room (30% near the heater) and 100 per wall. With an internal wall, points inside the solid are dropped and its faces get a no-flux residual. This loop is where the PINN failed:
+
+- **Sink (E5b):** shrinking f is the easiest way to lower the PDE loss early in training, so f collapses to zero.
+- **Wall (X1):** the network smooths across the wall instead of resolving the temperature jump.
+
+### FD-inverse
+
+The physics is solved exactly on a grid; only the few coefficients are searched.
+
+- Start from 3–4 initial guesses for log Bi (and log f).
+- For each guess: solve the finite-volume problem on a 101 × 81 grid, interpolate at the sensors, and compare with the readings.
+- Trust-region least squares, within bounds, updates the guess until it converges. The converged start with the lowest cost wins, and its Jacobian gives the local uncertainty.
+
+Each solve takes milliseconds, so a full fit with several starting points finishes in seconds. Internal walls are handled by removing solid grid cells, which makes their faces exactly no-flux.
+
 ## Results
 
 Temperature error is the RMSE over grid nodes that are not training sensors (°C). Bi errors are relative errors in S / E / N order.
@@ -57,26 +86,37 @@ What the results show:
 
 ## Repository layout
 
-```
-classroom_heat_pinn_data/
-  synthetic/        data generators and solvers
-    solver.py         vertex-centred finite-volume solver (rectangular room)
-    solver_wall.py    the same with internal adiabatic solids (cell mask)
-    generate_*.py     base, E5b (sink), X1 (wall), X2 (wall + sink) datasets
-    data/ e5b/ x1/ x2/  known_*.json + sensors_*.csv (training), config_*.json + reference_*.npz (truth)
-  src/              estimation and experiments
-    common.py         training-side loaders (never open truth files)
-    evaluate.py       the only truth loader; every read is logged
-    fd.py, baselines.py   FD forward wrapper, FD-inverse, RBF
-    pinn.py           PINN model, sampling, losses, training
-    run_experiments.py    CLI for all experiments
-    extensions_fd.py  X1-d and X2 FD runs
-  diagnostics/      development-only PINN and solver diagnostics
-  results/          per-experiment summaries, checkpoints, figures, metrics.csv, REPORT.md
-  real/             cleaned public indoor-temperature data (Medellín ITM, Intel Berkeley Lab); not used in the results above
-tests/              unittest suite (125 tests)
-hackathon-demo/     interactive web demo (not tracked by git)
-```
+All research code lives in `classroom_heat_pinn_data/`.
+
+**Data and solvers** — `synthetic/`
+
+| Path | Contents |
+|---|---|
+| `solver.py` | Vertex-centred finite-volume solver for the rectangular room |
+| `solver_wall.py` | The same solver with internal adiabatic walls (solid cells removed) |
+| `generate_data.py`, `generate_e5b.py`, `generate_x1.py`, `generate_x2.py` | Dataset generators: base, sink, wall, wall + sink |
+| `data/`, `e5b/`, `x1/`, `x2/` | Generated datasets: `known_*.json` and `sensors_*.csv` for training; `config_*.json` and `reference_*.npz` are ground truth |
+
+**Estimation and experiments** — `src/`
+
+| Path | Contents |
+|---|---|
+| `common.py` | Training-side loaders; never open truth files |
+| `evaluate.py` | The only truth loader; logs every read |
+| `fd.py`, `baselines.py` | FD forward wrapper, FD-inverse, RBF interpolation |
+| `pinn.py` | PINN model, collocation sampling, losses, training loop |
+| `run_experiments.py` | Command-line entry point for every experiment |
+| `extensions_fd.py` | FD runs for X1 and X2 |
+
+**Everything else**
+
+| Path | Contents |
+|---|---|
+| `classroom_heat_pinn_data/results/` | Per-experiment summaries, checkpoints, figures, `metrics.csv`, `REPORT.md` |
+| `classroom_heat_pinn_data/diagnostics/` | Development-only PINN and solver diagnostics |
+| `classroom_heat_pinn_data/real/` | Cleaned public indoor-temperature data (Medellín ITM, Intel Berkeley Lab); not used in the results above |
+| `tests/` | `unittest` suite (125 tests) |
+| `hackathon-demo/` | Interactive web demo (not tracked by git) |
 
 ## Setup
 
