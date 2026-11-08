@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from classroom_heat_pinn_data.src import common, pinn, run_experiments as rx
+from classroom_heat_pinn_data.src import common, fd, pinn, run_experiments as rx
 from classroom_heat_pinn_data.synthetic import solver_wall
 
 DT = pinn.DTYPE
@@ -111,11 +111,69 @@ class X1ResidualTests(unittest.TestCase):
     def test_wall_gradient_flux_excludes_covered_outer_stretch(self):
         # theta = x: -grad(theta).n = 1 on W, so the W flux is the fluid-exposed length 0.8 - 0.04.
         fl = pinn.heat_flows(_model(self.known, lambda xy: xy[:, 0]), self.known)
-        # 401-point trapezoid (spacing 0.002): masking the covered stretch is exact to about one spacing.
-        self.assertAlmostEqual(fl["flux_grad"]["W"], 0.76, delta=3e-3)
-        self.assertLess(fl["flux_grad"]["W"], 0.8 - 0.03)
+        # each exposed stretch is integrated on its own grid, so the end points are exact (LOG-109)
+        self.assertAlmostEqual(fl["flux_grad"]["W"], 0.76, places=12)
         open_room = pinn.heat_flows(_model(common.load_known(), lambda xy: xy[:, 0]), common.load_known())
         self.assertAlmostEqual(open_room["flux_grad"]["W"], 0.8, places=10)
+
+    def test_fully_covered_outer_wall_has_no_group_and_zero_flux(self):
+        # LOG-107 X1-PINN-FULL-COVER-01: a solid covering all of W must not hang the sampler.
+        known = {**self.known, "solids": [{"x0": 0.0, "x1": 0.05, "y0": 0.0, "y1": 0.8}]}
+        self.assertEqual(pinn.exposed_intervals(known, "W"), [])
+        walls = pinn.sample_walls(100, known, torch.Generator().manual_seed(0))
+        self.assertNotIn("W", walls)
+        self.assertEqual(len(walls["S"]), 100)
+        self.assertTrue((walls["S"][:, 0] > 0.05).all())
+        fl = pinn.heat_flows(_model(known, lambda xy: xy[:, 0]), known)
+        self.assertEqual(fl["flux_grad"]["W"], 0.0)
+        g = torch.Generator().manual_seed(2)
+        _, parts = pinn.losses(_model(known), known, pinn.sample_interior(100, known, g), pinn.sample_walls(20, known, g))
+        self.assertNotIn("bc_W", parts)
+
+    def test_solids_outside_the_room_are_clipped_like_fd(self):
+        # LOG-111 PINN-DOMAIN-CLIP-01: a solid entirely above the room changes nothing, as in FD.
+        open_room = common.load_known()
+        outside = {**open_room, "solids": [{"x0": 0.0, "x1": 0.6, "y0": 0.9, "y1": 1.0}]}
+        self.assertEqual(pinn.exposed_intervals(outside, "W"), [(0.0, 0.8)])
+        walls = pinn.sample_walls(100, outside, torch.Generator().manual_seed(0))
+        self.assertTrue(((walls["W"][:, 1] > 0) & (walls["W"][:, 1] < 0.8)).all())
+        self.assertNotIn("X", walls)
+        self.assertEqual(pinn.fluid_heater_power(outside), pinn.fluid_heater_power(open_room))
+        fd_open = fd.solve_field(BI, open_room, nx=101)[2]
+        fd_out = fd.solve_field(BI, outside, nx=101)[2]
+        np.testing.assert_array_equal(fd_open, fd_out)
+        # LOG-114 P3: same random draws, wall points and heater normalisation as the open room
+        g1, g2 = torch.Generator().manual_seed(5), torch.Generator().manual_seed(5)
+        a, b = pinn.sample_walls(50, outside, g1), pinn.sample_walls(50, open_room, g2)
+        self.assertEqual(set(a), set(b))
+        for w in a:
+            torch.testing.assert_close(a[w], b[w], rtol=0, atol=0)
+        torch.testing.assert_close(torch.rand(3, generator=g1), torch.rand(3, generator=g2), rtol=0, atol=0)
+        e5b = common.load_known_e5b()
+        geom = common.sink_geometry(e5b)
+        self.assertEqual(pinn._domain_integrals({**e5b, "solids": outside["solids"]}, geom), pinn._domain_integrals(e5b, geom))
+        # partly outside: only the in-room part counts
+        partly = {**open_room, "solids": [{"x0": -0.2, "x1": 0.6, "y0": 0.30, "y1": 0.34}]}
+        self.assertEqual(pinn.exposed_intervals(partly, "W"), pinn.exposed_intervals(self.known, "W"))
+        self.assertEqual(pinn.fluid_heater_power(partly), pinn.fluid_heater_power(self.known))
+        self.assertEqual(pinn.solid_faces(partly), pinn.solid_faces(self.known))
+
+    def test_x2_sink_removes_fraction_of_fluid_heater_power(self):
+        # LOG-107: with solids the heater and sink integrals are exact over the fluid region.
+        known = common.load_known_x2()
+        torch.manual_seed(0)
+        m = pinn.HeatPINN(known, hidden=8, depth=1, bi_fixed=BI, sink=0.1)
+        sink = known["sink"]
+        S = pinn.fluid_gaussian_integral(known, sink["x"], sink["y"], sink["s"])
+        H = pinn.fluid_heater_power(known)
+        self.assertAlmostEqual(float(m.heater_power), H, places=14)
+        self.assertAlmostEqual(float(m.sink_fraction() * m.heater_power / m.sink_shape_integral) * S / H, 0.1, places=12)
+        fd_info = fd.solve_field(BI, known, nx=201, sink_fraction=0.1)[3]
+        self.assertLess(abs(H / fd_info["heater_power"] - 1), 1e-3)
+        # open room: exact integral agrees with the existing trapezoid to its accuracy
+        base = common.load_known()
+        h = base["heater"]
+        self.assertLess(abs(pinn.fluid_heater_power(base) / pinn._domain_integrals(base, {"x": .5, "y": .4, "s": .1})[0] - 1), 1e-3)
 
     def test_short_training_runs_with_the_wall(self):
         m = _model(self.known)

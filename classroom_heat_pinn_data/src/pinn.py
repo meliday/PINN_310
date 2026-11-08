@@ -8,6 +8,7 @@ Network input is transformed inside forward(); derivatives are taken by autograd
 with respect to the raw (x, y). Bi = exp(beta). Forward mode (E1) fixes Bi as a
 buffer; inverse mode (E2) learns beta from a fresh network with beta = 0.
 """
+import math
 import time
 
 import numpy as np
@@ -113,8 +114,53 @@ def _trapz2(F, gx, gy):
     return _trapz(np.array([_trapz(F[i], gy) for i in range(len(gx))]), gx)
 
 
+def gaussian_rect_integral(x, y, s, rect):
+    """Exact integral of exp(-((X-x)^2 + (Y-y)^2) / (2 s^2)) over rect = (x0, x1, y0, y1)."""
+    x0, x1, y0, y1 = rect
+    c = math.sqrt(2.0) * s
+    return (math.pi / 2) * s * s * (math.erf((x1 - x) / c) - math.erf((x0 - x) / c)) \
+        * (math.erf((y1 - y) / c) - math.erf((y0 - y) / c))
+
+
+def solids_in_room(known):
+    """Solids clipped to the room as (x0, x1, y0, y1); solids with no area inside the room are dropped.
+
+    Same contract as the FD cell mask, which only ever sees the part of a solid inside the room
+    (PINN-DOMAIN-CLIP-01, LOG-111).
+    """
+    LX, LY = known["domain"]["LX"], known["domain"]["LY"]
+    out = []
+    for q in common.solids(known):
+        r = (max(q["x0"], 0.0), min(q["x1"], LX), max(q["y0"], 0.0), min(q["y1"], LY))
+        if r[0] < r[1] and r[2] < r[3]:
+            out.append(r)
+    return out
+
+
+def fluid_gaussian_integral(known, x, y, s):
+    """Exact Gaussian integral over the fluid region: domain minus solids (solids may not overlap)."""
+    LX, LY = known["domain"]["LX"], known["domain"]["LY"]
+    rects = solids_in_room(known)
+    for i, a in enumerate(rects):
+        for b in rects[i + 1:]:
+            if min(a[1], b[1]) > max(a[0], b[0]) and min(a[3], b[3]) > max(a[2], b[2]):
+                raise ValueError("overlapping solids are not supported by the exact fluid integral")
+    return gaussian_rect_integral(x, y, s, (0.0, LX, 0.0, LY)) - sum(gaussian_rect_integral(x, y, s, r) for r in rects)
+
+
+def fluid_heater_power(known, key="heater"):
+    h = known[key]
+    return h["A"] * fluid_gaussian_integral(known, h["x"], h["y"], h["s"])
+
+
 def _domain_integrals(known, geom, nx=401, ny=321):
-    """(heater power, sink shape integral) over the domain by the trapezoid rule."""
+    """(heater power, sink shape integral) over the domain by the trapezoid rule.
+
+    With solids (X2) both are exact fluid-region integrals, so a configured sink fraction f
+    removes exactly f of the heater power that enters the fluid (LOG-107/109).
+    """
+    if solids_in_room(known):
+        return fluid_heater_power(known), fluid_gaussian_integral(known, geom["x"], geom["y"], geom["s"])
     LX, LY = known["domain"]["LX"], known["domain"]["LY"]
     gx, gy = np.linspace(0, LX, nx), np.linspace(0, LY, ny)
     X, Y = np.meshgrid(gx, gy, indexing="ij")
@@ -207,7 +253,7 @@ def _outside_solids(pts, known, gen):
 
     Without solids the points are returned untouched and no random numbers are drawn.
     """
-    if not common.solids(known):
+    if not solids_in_room(known):
         return pts
     LX, LY = known["domain"]["LX"], known["domain"]["LY"]
     n = len(pts)
@@ -228,15 +274,20 @@ def sample_walls(n, known, gen):
         "S": torch.stack([s(LX), zeros], 1), "N": torch.stack([s(LX), LY * ones], 1),
         "W": torch.stack([zeros, s(LY)], 1), "E": torch.stack([LX * ones, s(LY)], 1),
     }
-    if common.solids(known):  # X1: outer-wall stretches covered by a solid have no fluid (LOG-104)
-        for w, pts in walls.items():
-            keep = pts[torch.from_numpy(~outer_wall_covered(pts.numpy(), known, w))]
-            while len(keep) < n:  # top up from the same generator, only when solids exist
-                t = s(LX if w in ("S", "N") else LY)[: n - len(keep)]
-                fixed = torch.full_like(t, {"S": 0.0, "N": LY, "W": 0.0, "E": LX}[w])
-                extra = torch.stack([t, fixed], 1) if w in ("S", "N") else torch.stack([fixed, t], 1)
-                keep = torch.cat([keep, extra[torch.from_numpy(~outer_wall_covered(extra.numpy(), known, w))]])
-            walls[w] = keep
+    if solids_in_room(known):  # X1/X2: points only on the fluid-exposed stretches of each outer wall (LOG-109)
+        fixed_at = {"S": 0.0, "N": LY, "W": 0.0, "E": LX}
+        for w in list(walls):
+            spans = [(a + eps, b - eps) for a, b in exposed_intervals(known, w) if b - a > 2 * eps]
+            if not spans:  # fully covered: no fluid boundary here, so no boundary group
+                del walls[w]
+                continue
+            lengths = torch.tensor([b - a for a, b in spans], dtype=DTYPE)
+            u = torch.rand(n, generator=gen, dtype=DTYPE) * lengths.sum()
+            ends = torch.cumsum(lengths, 0)
+            k = torch.clamp(torch.searchsorted(ends, u, right=True), max=len(spans) - 1)
+            t = torch.tensor([a for a, _ in spans], dtype=DTYPE)[k] + u - (ends - lengths)[k]
+            fixed = torch.full_like(t, fixed_at[w])
+            walls[w] = torch.stack([t, fixed], 1) if w in ("S", "N") else torch.stack([fixed, t], 1)
     faces = solid_faces(known)
     if faces:  # X1: about n points on the fluid-facing solid faces, by length, at least 10 per face
         total = sum(f["length"] for f in faces)
@@ -267,19 +318,38 @@ def outer_wall_covered(xy, known, wall, tol=1e-12):
     return hit
 
 
+def exposed_intervals(known, wall):
+    """Fluid-exposed stretches [(a, b)] along outer wall `wall` (x for S/N, y for W/E); [] if fully covered."""
+    LX, LY = known["domain"]["LX"], known["domain"]["LY"]
+    length = LX if wall in ("S", "N") else LY
+    covered = []
+    for x0, x1, y0, y1 in solids_in_room(known):  # only the part of a solid inside the room counts
+        touches = {"W": x0 <= 0.0, "E": x1 >= LX, "S": y0 <= 0.0, "N": y1 >= LY}[wall]
+        if touches:
+            covered.append((x0, x1) if wall in ("S", "N") else (y0, y1))
+    out, pos = [], 0.0
+    for a, b in sorted(covered):
+        if a > pos:
+            out.append((pos, a))
+        pos = max(pos, b)
+    if pos < length:
+        out.append((pos, length))
+    return out
+
+
 def solid_faces(known):
     """Fluid-facing faces of the solids: [{along, at, start, length}]; faces on the outer wall are skipped."""
     LX, LY = known["domain"]["LX"], known["domain"]["LY"]
     faces = []
-    for s in common.solids(known):
-        if s["y0"] > 0:
-            faces.append({"along": "x", "at": s["y0"], "start": s["x0"], "length": s["x1"] - s["x0"]})
-        if s["y1"] < LY:
-            faces.append({"along": "x", "at": s["y1"], "start": s["x0"], "length": s["x1"] - s["x0"]})
-        if s["x0"] > 0:
-            faces.append({"along": "y", "at": s["x0"], "start": s["y0"], "length": s["y1"] - s["y0"]})
-        if s["x1"] < LX:
-            faces.append({"along": "y", "at": s["x1"], "start": s["y0"], "length": s["y1"] - s["y0"]})
+    for x0, x1, y0, y1 in solids_in_room(known):  # clipped to the room, as in the FD cell mask
+        if y0 > 0:
+            faces.append({"along": "x", "at": y0, "start": x0, "length": x1 - x0})
+        if y1 < LY:
+            faces.append({"along": "x", "at": y1, "start": x0, "length": x1 - x0})
+        if x0 > 0:
+            faces.append({"along": "y", "at": x0, "start": y0, "length": y1 - y0})
+        if x1 < LX:
+            faces.append({"along": "y", "at": x1, "start": y0, "length": y1 - y0})
     return faces
 
 
@@ -318,15 +388,26 @@ def heat_flows(model, known, n=401):
     bi = model.bi().detach().numpy()
     tinf = model.theta_inf.numpy()
     flux, flux_grad = {}, {}
+    solids = solids_in_room(known)
     for w, p in pts.items():
-        theta, grad, _ = derivatives(model, torch.tensor(p, dtype=DTYPE), second=False)
-        theta, grad = theta.detach().numpy(), grad.detach().numpy()
-        coord = p[:, 0] if w in ("S", "N") else p[:, 1]
-        open_ = ~outer_wall_covered(p, known, w) if common.solids(known) else np.ones(len(p), bool)
-        flux_grad[w] = _trapz(-(grad @ np.array(NORMALS[w])) * open_, coord)
+        if solids:  # integrate each fluid-exposed stretch on its own grid (exact end points, LOG-109)
+            fixed = {"S": 0.0, "N": LY, "W": 0.0, "E": LX}[w]
+            pieces = []
+            for a, b in exposed_intervals(known, w):
+                c = np.linspace(a, b, max(3, int(round(n * (b - a) / (LX if w in ("S", "N") else LY)))))
+                pieces.append((c, np.c_[c, fixed + 0 * c] if w in ("S", "N") else np.c_[fixed + 0 * c, c]))
+        else:
+            pieces = [(p[:, 0] if w in ("S", "N") else p[:, 1], p)]
+        flux_grad[w] = 0.0
         if w != "W":
-            i = common.ROBIN_WALLS.index(w)
-            flux[w] = _trapz(bi[i] * (theta - tinf[i]) * open_, coord)
+            flux[w] = 0.0
+        for coord, q in pieces:
+            theta, grad, _ = derivatives(model, torch.tensor(q, dtype=DTYPE), second=False)
+            theta, grad = theta.detach().numpy(), grad.detach().numpy()
+            flux_grad[w] += _trapz(-(grad @ np.array(NORMALS[w])), coord)
+            if w != "W":
+                i = common.ROBIN_WALLS.index(w)
+                flux[w] += _trapz(bi[i] * (theta - tinf[i]), coord)
     faces = solid_faces(known)
     if faces:  # X1: gradient flux into the solids (adiabatic, should be ~0); n points per face
         flux_grad["X"] = 0.0
@@ -344,10 +425,11 @@ def heat_flows(model, known, n=401):
     # Source integral by the same trapezoid rule on a fine tensor grid (solid interiors excluded).
     gx, gy = np.linspace(0, LX, 401), np.linspace(0, LY, 321)
     X, Y = np.meshgrid(gx, gy, indexing="ij")
-    Q = source(torch.tensor(np.c_[X.ravel(), Y.ravel()], dtype=DTYPE), known).numpy().reshape(X.shape)
-    if faces:
-        Q = Q * ~common.inside_solid(np.c_[X.ravel(), Y.ravel()], known).reshape(X.shape)
-    H = _trapz(np.array([_trapz(Q[i], gy) for i in range(len(gx))]), gx)
+    if faces:  # exact fluid-region heater power (LOG-109)
+        H = fluid_heater_power(known)
+    else:
+        Q = source(torch.tensor(np.c_[X.ravel(), Y.ravel()], dtype=DTYPE), known).numpy().reshape(X.shape)
+        H = _trapz(np.array([_trapz(Q[i], gy) for i in range(len(gx))]), gx)
     out = {w: max(flux[w], 0.0) for w in flux}
     out_sum = sum(out.values())
     # With a sink (E5b) the walls carry heater - sink; shares stay relative to the heater (H).
