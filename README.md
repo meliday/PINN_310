@@ -8,7 +8,7 @@ Estimate the full temperature field of a room and the heat-loss coefficient of e
 
 Everything below is on **synthetic data** from a simplified 2D steady heat-conduction model, with one noise realisation and one PINN seed. It is a method comparison, not a measurement of a real classroom.
 
-**Bottom line:** for this problem FD-inverse is the baseline to beat. It recovered the coefficients in every condition tested, in 2–4 s per fit. The PINN matched FD on the basic room, was not clearly better anywhere, and failed on two of the extensions (a local cooling sink and an internal wall). The full write-up is [`classroom_heat_pinn_data/results/REPORT.md`](classroom_heat_pinn_data/results/REPORT.md).
+**Bottom line:** for this problem FD-inverse is the baseline to beat. It recovered the coefficients in every condition tested, in 1.5–4 s per fit on the 101 grid (8–9 s on the 201 grid). The PINN matched FD on the basic room, was not clearly better anywhere, and failed on two of the extensions (a local cooling sink and an internal wall). The full write-up is [`classroom_heat_pinn_data/results/REPORT.md`](classroom_heat_pinn_data/results/REPORT.md).
 
 ## The model
 
@@ -69,16 +69,17 @@ Temperature error is the RMSE over grid nodes that are not training sensors (°C
 | Model mismatch (E5) | noisy | FD / PINN | both ≈ +31% on Bi_E | — | 0.364 / 0.354 | — |
 | Sink (E5b) | clean | FD-inverse | ≈ 0 | −0.04% | 0.0005 | 3 s |
 | Sink (E5b) | clean | **PINN** | +15 / +19 / −25% | **−99.5% (f → 0)** | 0.181 | 334 s |
-| Wall (X1) | clean | FD-inverse, grid 201 | +0.24 / −0.12 / −0.43% | — | 0.004 | < 30 s |
+| Wall (X1) | clean | FD-inverse, grid 201 | +0.24 / −0.12 / −0.43% | — | 0.004 | 7.6 s |
 | Wall (X1) | none (true Bi fixed) | **PINN forward** | — | — | **13.3 (rel. L2 54%), all fluid nodes** | 342 s |
-| Wall + sink (X2) | clean | FD-inverse, grid 101 | +0.8 / −0.3 / −1.3% | −0.4% | 0.022 | — |
-| Wall + sink (X2) | noisy | FD-inverse, grid 101 | +2.2 / −1.3 / −1.6% | −3.2% | 0.048 | — |
+| Wall + sink (X2) | clean | FD-inverse, grid 101 | +0.8 / −0.3 / −1.3% | −0.4% | 0.022 | 3.4 s |
+| Wall + sink (X2) | noisy | FD-inverse, grid 101 | +2.2 / −1.3 / −1.6% | −3.2% | 0.048 | 2.9 s |
 
 What the results show:
 
-- **The PINN failures are optimisation failures, not representation limits.**
-  - With the true sink strength fixed, the same PINN learns the E5b field to 0.009 °C. Learning the field and the coefficient together drives f to zero.
-  - With the true Bi fixed, the X1 PINN still smooths straight across the 0.4 m wall: a jump of more than 25 °C that it never resolves.
+- **The two PINN failures are different in kind.**
+  - **Sink (E5b):** with the true sink strength fixed, the same PINN learns the field to 0.009 °C. Learning the field and the coefficient together drives f to zero. This points to the joint optimisation rather than the network's capacity, at least for the one seed and few settings tried.
+  - **Wall (X1):** even with the true Bi fixed, the PINN smooths straight across the 0.4 m wall, a jump of more than 25 °C it never resolves. This is a forward-training failure, before any coefficient is estimated.
+  - Its cause was not isolated. A later review found that the training boundary points on the west wall also covered the stretch hidden by the internal wall; this is now fixed, but the saved run predates the fix and was not repeated.
 - **Leaving physics out of the model biases the coefficients, sometimes invisibly.**
   - Fitting the wall data without the wall collapses Bi_E and Bi_N to their lower bounds, and the temperature error reaches 6.6 °C.
   - Fitting sink data without the sink still matches temperatures to about 0.2 °C, but Bi is off by up to 27%. A good temperature fit does not mean correct coefficients.

@@ -16,11 +16,13 @@ import numpy as np
 
 try:
     from . import baselines, common, evaluate, fd
+    from ..synthetic import ident
 except ImportError:
     import src.baselines as baselines
     import src.common as common
     import src.evaluate as evaluate
     import src.fd as fd
+    from synthetic import ident
 
 EVAL_NX = 201
 X2_NX = 101
@@ -77,10 +79,11 @@ def sensor_jacobian(beta, known, obs, use_sink, nx, h=1e-4):
 
 
 def local_std(J, dT, names):
-    s = np.linalg.svd(J, compute_uv=False)
-    out = {"rank": int(np.sum(s > s[0] * 1e-10)), "condition_number": float(s[0] / s[-1])}
-    if out["rank"] == len(names):
-        cov = np.linalg.inv(J.T @ J) * (SIGMA_C / dT) ** 2
+    """Local relative std at SIGMA_C from the SVD of J (no normal matrix J^T J, which loses
+    weak directions to round-off; EXT-FD-COVARIANCE-01). Rank-deficient J gets no covariance."""
+    cov, diag = ident.covariance_from_jacobian(J, sigma=SIGMA_C / dT)
+    out = {"rank": diag["rank"], "condition_number": diag["condition_number"]}
+    if cov is not None:
         d = np.sqrt(np.diag(cov))
         out["rel_std_0.1C"] = dict(zip(names, d))
         out["correlation"] = (cov / np.outer(d, d)).tolist()

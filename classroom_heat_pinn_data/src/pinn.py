@@ -228,6 +228,15 @@ def sample_walls(n, known, gen):
         "S": torch.stack([s(LX), zeros], 1), "N": torch.stack([s(LX), LY * ones], 1),
         "W": torch.stack([zeros, s(LY)], 1), "E": torch.stack([LX * ones, s(LY)], 1),
     }
+    if common.solids(known):  # X1: outer-wall stretches covered by a solid have no fluid (LOG-104)
+        for w, pts in walls.items():
+            keep = pts[torch.from_numpy(~outer_wall_covered(pts.numpy(), known, w))]
+            while len(keep) < n:  # top up from the same generator, only when solids exist
+                t = s(LX if w in ("S", "N") else LY)[: n - len(keep)]
+                fixed = torch.full_like(t, {"S": 0.0, "N": LY, "W": 0.0, "E": LX}[w])
+                extra = torch.stack([t, fixed], 1) if w in ("S", "N") else torch.stack([fixed, t], 1)
+                keep = torch.cat([keep, extra[torch.from_numpy(~outer_wall_covered(extra.numpy(), known, w))]])
+            walls[w] = keep
     faces = solid_faces(known)
     if faces:  # X1: about n points on the fluid-facing solid faces, by length, at least 10 per face
         total = sum(f["length"] for f in faces)
@@ -240,6 +249,22 @@ def sample_walls(n, known, gen):
             pts.append(torch.stack([start + t, fixed], 1) if f["along"] == "x" else torch.stack([fixed, start + t], 1))
         walls["X"] = torch.cat(pts)
     return walls
+
+
+def outer_wall_covered(xy, known, wall, tol=1e-12):
+    """True where a point on outer wall `wall` lies on a stretch covered by a solid (no fluid there).
+
+    Along the wall the solid's open span counts (its end points are fluid corners); across the
+    wall the solid must touch it.
+    """
+    xy = np.asarray(xy, float)
+    hit = np.zeros(len(xy), dtype=bool)
+    for s in common.solids(known):
+        if wall in ("W", "E"):
+            hit |= (xy[:, 0] >= s["x0"] - tol) & (xy[:, 0] <= s["x1"] + tol) & (xy[:, 1] > s["y0"]) & (xy[:, 1] < s["y1"])
+        else:
+            hit |= (xy[:, 1] >= s["y0"] - tol) & (xy[:, 1] <= s["y1"] + tol) & (xy[:, 0] > s["x0"]) & (xy[:, 0] < s["x1"])
+    return hit
 
 
 def solid_faces(known):
@@ -297,10 +322,11 @@ def heat_flows(model, known, n=401):
         theta, grad, _ = derivatives(model, torch.tensor(p, dtype=DTYPE), second=False)
         theta, grad = theta.detach().numpy(), grad.detach().numpy()
         coord = p[:, 0] if w in ("S", "N") else p[:, 1]
-        flux_grad[w] = _trapz(-(grad @ np.array(NORMALS[w])), coord)
+        open_ = ~outer_wall_covered(p, known, w) if common.solids(known) else np.ones(len(p), bool)
+        flux_grad[w] = _trapz(-(grad @ np.array(NORMALS[w])) * open_, coord)
         if w != "W":
             i = common.ROBIN_WALLS.index(w)
-            flux[w] = _trapz(bi[i] * (theta - tinf[i]), coord)
+            flux[w] = _trapz(bi[i] * (theta - tinf[i]) * open_, coord)
     faces = solid_faces(known)
     if faces:  # X1: gradient flux into the solids (adiabatic, should be ~0); n points per face
         flux_grad["X"] = 0.0

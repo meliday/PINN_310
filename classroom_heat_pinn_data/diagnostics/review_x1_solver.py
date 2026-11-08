@@ -3,6 +3,10 @@
 Run from the repository root with --output-dir pointing to a new directory.
 The cell-by-cell oracle deliberately does not use solver_wall.fluid_cells or
 its vectorised conductance/volume expressions. See joint record LOG-075.
+
+The saved results in results/x1/codex_review are the LOG-075 snapshot, when point
+contacts and unanchored regions were still accepted. Since LOG-077/081 the solver
+rejects them before solving; those cases below now record the rejection (LOG-105).
 """
 import argparse
 import gc
@@ -145,13 +149,17 @@ def mms_checks():
 def edge_cases():
     # Two fluid regions that only touch at a single vertex are distinct open regions.
     solids=[{'x0':0.,'x1':.5,'y0':.4,'y1':.8},{'x0':.5,'x1':1.,'y0':0.,'y1':.4}]
-    x,y,t,info=sw.solve(51,BI,TINF,solids=solids,heaters=[])
-    fluid=info['fluid_cells'].astype(bool)
-    from scipy.ndimage import label
-    n_fluid=int(label(fluid,structure=np.array([[0,1,0],[1,1,1],[0,1,0]]))[1])
-    n_graph=int(connected_components(info['matrix'],directed=False,return_labels=False))
-    result={'point_touch_geometry':{'fluid_components':n_fluid,'solver_components':n_graph,
-                                    'accepted':True},'invalid_rectangles':[]}
+    try:
+        x,y,t,info=sw.solve(51,BI,TINF,solids=solids,heaters=[])
+    except ValueError as exc:  # current contract (LOG-077/081): rejected before solving
+        result={'point_touch_geometry':{'accepted':False,'rejected':str(exc)},'invalid_rectangles':[]}
+    else:
+        fluid=info['fluid_cells'].astype(bool)
+        from scipy.ndimage import label
+        n_fluid=int(label(fluid,structure=np.array([[0,1,0],[1,1,1],[0,1,0]]))[1])
+        n_graph=int(connected_components(info['matrix'],directed=False,return_labels=False))
+        result={'point_touch_geometry':{'fluid_components':n_fluid,'solver_components':n_graph,
+                                        'accepted':True},'invalid_rectangles':[]}
     for solid in [{'x0':.6,'x1':.2,'y0':.3,'y1':.34},
                   {'x0':0.,'x1':.6,'y0':.3,'y1':.3}]:
         try:
@@ -159,14 +167,18 @@ def edge_cases():
             result['invalid_rectangles'].append({'solid':solid,'accepted':True,'fluid_area':float(i['vol'].sum())})
         except ValueError as exc:
             result['invalid_rectangles'].append({'solid':solid,'accepted':False,'error':str(exc)})
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter('always')
-        _,_,u,i=sw.solve(51,{'E':1.},{},solids=[{'x0':.4,'x1':.6,'y0':0.,'y1':.8}],
-                       heaters=[{'x':.2,'y':.4,'s':.05,'A':1.}])
-    result['unanchored_component']={'warnings':[str(w.message) for w in caught],
-                                   'finite_output':bool(np.isfinite(u[i['active']]).all()),
-                                   'maxabs':float(abs(u[np.isfinite(u)]).max()) if np.isfinite(u).any() else None,
-                                   'balance_rel_err':i['balance_rel_err'] if np.isfinite(i['balance_rel_err']) else None}
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            _,_,u,i=sw.solve(51,{'E':1.},{},solids=[{'x0':.4,'x1':.6,'y0':0.,'y1':.8}],
+                           heaters=[{'x':.2,'y':.4,'s':.05,'A':1.}])
+    except ValueError as exc:  # current contract (LOG-077): rejected before solving
+        result['unanchored_component']={'accepted':False,'rejected':str(exc)}
+    else:
+        result['unanchored_component']={'warnings':[str(w.message) for w in caught],
+                                       'finite_output':bool(np.isfinite(u[i['active']]).all()),
+                                       'maxabs':float(abs(u[np.isfinite(u)]).max()) if np.isfinite(u).any() else None,
+                                       'balance_rel_err':i['balance_rel_err'] if np.isfinite(i['balance_rel_err']) else None}
     x,y,u,i=sw.solve(101,BI,TINF,solids=[WALL],heaters=[])
     pts=np.array([[.3,.3],[.3,.34],[.6,.32],[.3,.4]])
     sampled=solver.sample(x,y,u,pts)
@@ -252,12 +264,17 @@ def supplementary_checks():
         errors.append(float(abs(u[i['active']]-exact(X,Y)[i['active']]).max()))
     orders=np.log2(np.array(errors[:-1])/errors[1:]).tolist();assert min(orders[-2:])>=1.8
     pinch=[{'x0':0.,'x1':.5,'y0':.4,'y1':.8},{'x0':.5,'x1':1.,'y0':0.,'y1':.4}]
-    _,_,u,i=sw.solve(51,BI,TINF,solids=pinch)
+    out={'exact_heater_power_no_wall':whole,'exact_heater_power_with_wall':whole-removed,
+         'removed_heater_fraction':removed/whole,'nonseparable_MMS_errors':errors,'nonseparable_MMS_orders':orders}
+    try:
+        _,_,u,i=sw.solve(51,BI,TINF,solids=pinch)
+    except ValueError as exc:  # current contract (LOG-077/081)
+        out['point_contact_rejected']=str(exc)
+        return out
     # Lower-left component has no source or warm external boundary; true solution is zero there.
-    return {'exact_heater_power_no_wall':whole,'exact_heater_power_with_wall':whole-removed,
-            'removed_heater_fraction':removed/whole,'nonseparable_MMS_errors':errors,
-            'nonseparable_MMS_orders':orders,'point_contact_cold_component_S_flux':i['total_flux']['S'],
-            'point_contact_cold_component_temperature_max':float(np.nanmax(u[:25,:20]))}
+    out.update(point_contact_cold_component_S_flux=i['total_flux']['S'],
+               point_contact_cold_component_temperature_max=float(np.nanmax(u[:25,:20])))
+    return out
 
 
 def sensor_diagnostic(out):

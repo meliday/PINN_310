@@ -62,6 +62,16 @@ class X1SamplingTests(unittest.TestCase):
         self.assertTrue(((X[tip, 1] > 0.30) & (X[tip, 1] < 0.34)).all())
         self.assertNotIn("X", pinn.sample_walls(100, common.load_known(), torch.Generator().manual_seed(0)))
 
+    def test_outer_wall_points_skip_the_stretch_covered_by_the_wall(self):
+        # X1-PINN-OCCLUDED-W-01: the solid covers W for y in (0.30, 0.34); no boundary point there.
+        walls = pinn.sample_walls(100, self.known, torch.Generator().manual_seed(0))
+        for w in ("S", "E", "N", "W"):
+            with self.subTest(wall=w):
+                self.assertEqual(len(walls[w]), 100)
+                self.assertFalse(pinn.outer_wall_covered(walls[w].numpy(), self.known, w).any())
+        W = walls["W"][:, 1]
+        self.assertFalse(((W > 0.30) & (W < 0.34)).any())
+
     def test_point_off_the_faces_is_refused(self):
         with self.assertRaisesRegex(ValueError, "exactly one solid face"):
             pinn.solid_face_normals(torch.tensor([[0.3, 0.32], [0.6, 0.30]], dtype=DT), common.solids(self.known))
@@ -97,6 +107,15 @@ class X1ResidualTests(unittest.TestCase):
         open_room = pinn.heat_flows(_model(common.load_known(), lambda xy: 0.0 * xy[:, 0] + 1.0), common.load_known())
         self.assertLess(fl["source_integral"], open_room["source_integral"])
         self.assertNotIn("X", open_room["flux_grad"])
+
+    def test_wall_gradient_flux_excludes_covered_outer_stretch(self):
+        # theta = x: -grad(theta).n = 1 on W, so the W flux is the fluid-exposed length 0.8 - 0.04.
+        fl = pinn.heat_flows(_model(self.known, lambda xy: xy[:, 0]), self.known)
+        # 401-point trapezoid (spacing 0.002): masking the covered stretch is exact to about one spacing.
+        self.assertAlmostEqual(fl["flux_grad"]["W"], 0.76, delta=3e-3)
+        self.assertLess(fl["flux_grad"]["W"], 0.8 - 0.03)
+        open_room = pinn.heat_flows(_model(common.load_known(), lambda xy: xy[:, 0]), common.load_known())
+        self.assertAlmostEqual(open_room["flux_grad"]["W"], 0.8, places=10)
 
     def test_short_training_runs_with_the_wall(self):
         m = _model(self.known)

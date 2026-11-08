@@ -91,6 +91,20 @@ class ExtensionRunnerTests(unittest.TestCase):
         self.assertNotIn("solids", k)
         self.assertIn("sink", k)
 
+    def test_local_std_uses_svd_for_ill_conditioned_full_rank(self):
+        # EXT-FD-COVARIANCE-01: inv(J^T J) raised "Singular matrix" here; SVD gives a finite, large std.
+        J = np.array([[1.0, 1.0, 0.0], [0.0, 1e-9, 0.0], [0.0, 0.0, 0.1]])
+        out = xf.local_std(J, 20.0, ["a", "b", "c"])
+        self.assertEqual(out["rank"], 3)
+        std = np.array(list(out["rel_std_0.1C"].values()))
+        self.assertTrue(np.all(np.isfinite(std)))
+        self.assertGreater(std.max(), 1e6)
+        # well-conditioned: same as the normal-equation formula
+        A = np.random.default_rng(0).normal(size=(10, 4))
+        old = np.sqrt(np.diag(np.linalg.inv(A.T @ A))) * 0.1 / 20.0
+        np.testing.assert_allclose(list(xf.local_std(A, 20.0, list("abcd"))["rel_std_0.1C"].values()), old, rtol=1e-12)
+        self.assertNotIn("rel_std_0.1C", xf.local_std(np.c_[A[:, :3], A[:, 0]], 20.0, list("abcd")))
+
     def test_fitting_reads_no_truth(self):
         fake = {"status": "completed", "Bi": BI, "sink_fraction": 0.1, "n_converged": 1, "sensor_rms_C": 0.0}
 
