@@ -44,3 +44,17 @@
 2026-11-07T06:07:25+09:00	reference_x2.npz	X2 evaluation (wall_sink): Q1 reference
 2026-11-07T06:07:25+09:00	config_x2.json	X2 figure (wall_sink): true Bi, sink fraction, wall shares
 2026-11-07T06:07:25+09:00	reference_x2.npz	X2 figure (wall_sink): Q1 reference
+2026-11-09T04:10:40+09:00	config_stage1.json	Stage 1 evaluation: true Bi, f and reference pointers
+2026-11-09T04:10:40+09:00	reference.npz	Stage 1 evaluation: Q1 reference (base)
+2026-11-09T04:10:40+09:00	reference_e5b.npz	Stage 1 evaluation: Q1 reference (sink)
+2026-11-09T04:10:40+09:00	reference_x1.npz	Stage 1 evaluation: Q1 reference (wall)
+2026-11-09T04:10:40+09:00	reference_x2.npz	Stage 1 evaluation: Q1 reference (wall_sink)
+2026-11-09T04:10:40+09:00	reference_wall_eq.npz	Stage 1 evaluation: Q1 reference (wall_eq)
+2026-11-09T04:10:40+09:00	reference_wall_sink_eq.npz	Stage 1 evaluation: Q1 reference (wall_sink_eq)
+2026-11-09T04:40:58+09:00	config_stage1.json	Stage 1 evaluation: true Bi, f and reference pointers
+2026-11-09T04:40:58+09:00	reference.npz	Stage 1 evaluation: Q1 reference (base)
+2026-11-09T04:40:58+09:00	reference_e5b.npz	Stage 1 evaluation: Q1 reference (sink)
+2026-11-09T04:40:58+09:00	reference_x1.npz	Stage 1 evaluation: Q1 reference (wall)
+2026-11-09T04:40:58+09:00	reference_x2.npz	Stage 1 evaluation: Q1 reference (wall_sink)
+2026-11-09T04:40:58+09:00	reference_wall_eq.npz	Stage 1 evaluation: Q1 reference (wall_eq)
+2026-11-09T04:40:58+09:00	reference_wall_sink_eq.npz	Stage 1 evaluation: Q1 reference (wall_sink_eq)

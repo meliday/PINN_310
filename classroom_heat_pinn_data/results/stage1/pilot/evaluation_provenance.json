@@ -1,0 +1,13 @@
+{
+ "_note": "Added after the pilot run (LOG-124): SHA-256 of the evaluation files the pilot read. Recomputed on 2026-11-09 and equal to the hashes Codex recorded in LOG-121; summary.json, fits.csv and groups.csv are unchanged.",
+ "evaluation_sha256": {
+  "classroom_heat_pinn_data/synthetic/stage1/config_stage1.json": "02fc1089c5876391c063fd4c17c3de98d0defd758b06550e3fe913f30cb2aa40",
+  "classroom_heat_pinn_data/synthetic/data/reference.npz": "cb97795faf85b84163c04491339b1a6a2154c1a54c368f26d46fcd8805e971e3",
+  "classroom_heat_pinn_data/synthetic/e5b/reference_e5b.npz": "8aecf5dcb273862c11d564d4adc5d34377ae76e1ed82e43e524dd2452d82ae8b",
+  "classroom_heat_pinn_data/synthetic/x1/reference_x1.npz": "c9424628d0a0e52d0d6be57e88125857b5b772233cf35a6041d6862410b4fda1",
+  "classroom_heat_pinn_data/synthetic/x2/reference_x2.npz": "e8de50bd9b72b6ab7ae2df47920adbb2831d5d16628909ab75b1badfbb7ed4ef",
+  "classroom_heat_pinn_data/synthetic/stage1/reference_wall_eq.npz": "f5fd45bc14bee419532cafdc519e16b487451319bd17109b3a3c6bd22e57041a",
+  "classroom_heat_pinn_data/synthetic/stage1/reference_wall_sink_eq.npz": "bd46bc0f1f4d6a7c99f1b4f297418edf8be584fb8c3fd2bd85af3057debb0c31"
+ },
+ "matches_LOG_121": true
+}

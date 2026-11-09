@@ -1,0 +1,99 @@
+{
+  "_note": "Stage-1 truth. Generation / evaluation only; estimation code must not read this file.",
+  "preregistration": "LOG-117",
+  "conditions": {
+    "base": {
+      "Bi": {
+        "S": 1.0,
+        "E": 0.4,
+        "N": 0.25
+      },
+      "f": null,
+      "reference": "synthetic/data/reference.npz",
+      "heater_A": 8.65,
+      "basis": "amplitude"
+    },
+    "sink": {
+      "Bi": {
+        "S": 1.0,
+        "E": 0.4,
+        "N": 0.25
+      },
+      "f": 0.1,
+      "reference": "synthetic/e5b/reference_e5b.npz",
+      "heater_A": 8.65,
+      "basis": "amplitude"
+    },
+    "wall": {
+      "Bi": {
+        "S": 1.0,
+        "E": 0.4,
+        "N": 0.25
+      },
+      "f": null,
+      "reference": "synthetic/x1/reference_x1.npz",
+      "heater_A": 8.65,
+      "basis": "amplitude"
+    },
+    "wall_sink": {
+      "Bi": {
+        "S": 1.0,
+        "E": 0.4,
+        "N": 0.25
+      },
+      "f": 0.1,
+      "reference": "synthetic/x2/reference_x2.npz",
+      "heater_A": 8.65,
+      "basis": "amplitude"
+    },
+    "wall_eq": {
+      "Bi": {
+        "S": 1.0,
+        "E": 0.4,
+        "N": 0.25
+      },
+      "f": null,
+      "reference": "synthetic/stage1/reference_wall_eq.npz",
+      "heater_A": 8.831626941660398,
+      "basis": "equal_heat",
+      "heater_power_fluid_1601": 1.0099245886515247,
+      "energy_balance_rel_err_1601": 3.2706094757962317e-11,
+      "sink_fraction_realised_1601": null
+    },
+    "wall_sink_eq": {
+      "Bi": {
+        "S": 1.0,
+        "E": 0.4,
+        "N": 0.25
+      },
+      "f": 0.1,
+      "reference": "synthetic/stage1/reference_wall_sink_eq.npz",
+      "heater_A": 8.831626941660398,
+      "basis": "equal_heat",
+      "heater_power_fluid_1601": 1.0099245886515247,
+      "energy_balance_rel_err_1601": 3.4285245376715054e-11,
+      "sink_fraction_realised_1601": 0.10000000000000005
+    }
+  },
+  "equal_heat_scale": 1.0209973342959997,
+  "heater_power_open_1601": 1.009924588651525,
+  "heater_power_wall_amplitude_1601": 0.9891549710537592,
+  "noise_seeds": [
+    31000,
+    31001,
+    31002,
+    31003,
+    31004,
+    31005,
+    31006,
+    31007,
+    31008,
+    31009
+  ],
+  "sigmas_C": [
+    0.05,
+    0.1,
+    0.2
+  ],
+  "DT_K": 20.0
+}

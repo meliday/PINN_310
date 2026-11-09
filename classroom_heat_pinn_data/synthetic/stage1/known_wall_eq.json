@@ -1,0 +1,45 @@
+{
+  "_note": "X1: what estimation may use. Base known.json plus the internal wall geometry. Bi are unknown. Stage 1: heater amplitude scaled so the fluid region receives the open-room heater power (equal effective heat input).",
+  "domain": {
+    "LX": 1.0,
+    "LY": 0.8,
+    "L_m": 10.0
+  },
+  "temperature_scaling": {
+    "T_out_C": 0.0,
+    "DT_K": 20.0
+  },
+  "walls": {
+    "S": "window wall, Robin, theta_inf=0, Bi unknown",
+    "E": "exterior wall, Robin, theta_inf=0, Bi unknown",
+    "N": "corridor wall, Robin, theta_inf=0.7, Bi unknown",
+    "W": "neighbouring classroom, adiabatic"
+  },
+  "theta_inf": {
+    "S": 0.0,
+    "E": 0.0,
+    "N": 0.7
+  },
+  "heater": {
+    "x": 0.2,
+    "y": 0.6,
+    "A": 8.831626941660398,
+    "s": 0.15
+  },
+  "heater_whatif": {
+    "x": 0.5,
+    "y": 0.15,
+    "A": 8.65,
+    "s": 0.15
+  },
+  "k": 1.0,
+  "solids": [
+    {
+      "x0": 0.0,
+      "x1": 0.6,
+      "y0": 0.3,
+      "y1": 0.34,
+      "type": "adiabatic internal wall"
+    }
+  ]
+}

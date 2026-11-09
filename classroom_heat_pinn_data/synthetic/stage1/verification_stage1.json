@@ -1,0 +1,80 @@
+{
+  "layout_A_clean_equals_existing": {
+    "base": true,
+    "sink": true,
+    "wall": true,
+    "wall_sink": true
+  },
+  "equal_heat": {
+    "wall_eq": {
+      "heater_power_fluid_1601": 1.0099245886515247,
+      "energy_balance_rel_err_1601": 3.2706094757962317e-11,
+      "sink_fraction_realised_1601": null
+    },
+    "wall_sink_eq": {
+      "heater_power_fluid_1601": 1.0099245886515247,
+      "energy_balance_rel_err_1601": 3.4285245376715054e-11,
+      "sink_fraction_realised_1601": 0.10000000000000005
+    }
+  },
+  "equal_heat_power_rel_err": {
+    "wall_eq": -2.220446049250313e-16,
+    "wall_sink_eq": -2.220446049250313e-16
+  },
+  "layout_C": [
+    [
+      0.05,
+      0.05
+    ],
+    [
+      0.95,
+      0.75
+    ],
+    [
+      0.05,
+      0.75
+    ],
+    [
+      0.75,
+      0.05
+    ],
+    [
+      0.95,
+      0.65
+    ],
+    [
+      0.15,
+      0.75
+    ],
+    [
+      0.15,
+      0.05
+    ],
+    [
+      0.95,
+      0.55
+    ],
+    [
+      0.25,
+      0.75
+    ],
+    [
+      0.25,
+      0.05
+    ]
+  ],
+  "layout_C_in_fluid_all_conditions": true,
+  "noise_shape": [
+    10,
+    10
+  ],
+  "noise_mean": 0.17424922853952926,
+  "noise_std": 0.9268255405332722,
+  "passed": {
+    "layout_A_reproduces_existing_csv": true,
+    "equal_heat_power_within_1e-12": true,
+    "energy_lt_1e-8": true,
+    "sink_fraction_exact": true,
+    "layout_C_has_10_distinct_spaced": true
+  }
+}
